@@ -1,1 +1,1 @@
-# daktela-v6-php-connector
+# Daktela V6 PHP Connector

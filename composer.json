@@ -1,0 +1,23 @@
+{
+  "name": "daktela/daktela-v6-php-connector",
+  "description": "Enables connecting to Daktela V6 installation REST API from PHP code",
+  "minimum-stability": "stable",
+  "license": "proprietary",
+  "authors": [
+    {
+      "name": "Daktela",
+      "email": "daktela@daktela.com"
+    },
+    {
+      "name": "Jiri Havlicek",
+      "email": "jiri.havlicek@daktela.com"
+    },
+    {
+      "name": "Petr Kalisek",
+      "email": "petr.kalisek@daktela.com"
+    }
+  ],
+  "require": {
+    "php": ">=7.0"
+  }
+}

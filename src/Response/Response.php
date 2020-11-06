@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Daktela\Response;
 
+use Daktela\Response\Response;
+use Daktela\Response\Result;
+use Daktela\Type\Json;
 use Daktela\Response\Model\User as UserModel;
 use Daktela\Response\Model\Ticket as TicketModel;
-use Daktela\Type\Json;
 use Exceptions\Data\NotFoundException;
 
 /** @author Petr Kalíšek <petr.kalisek@daktela.com> */
@@ -33,28 +35,19 @@ class Response extends Json
         return $this;
     }
 
-    /**
-     * @return Result
-     * @throws NotFoundException
-     */
+    /** @throws NotFoundException */
     public function getResult(): Result
     {
         return Result::create(parent::getResult(), $this->entityDataClass);
     }
 
-    /**
-     * @return UserModel
-     * @throws NotFoundException
-     */
+    /** @throws NotFoundException */
     public function getUser(): UserModel
     {
         return UserModel::create(parent::getResult());
     }
 
-    /**
-     * @return TicketModel
-     * @throws NotFoundException
-     */
+    /** @throws NotFoundException */
     public function getTicket(): TicketModel
     {
         return TicketModel::create(parent::getResult());

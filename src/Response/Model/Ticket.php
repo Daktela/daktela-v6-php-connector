@@ -14,10 +14,7 @@ use Exceptions\Data\NotFoundException;
 class Ticket extends Json
 {
 
-    /**
-     * @return string
-     * @throws NotFoundException
-     */
+    /** @throws NotFoundException */
     public function getName(): string
     {
         return (string) parent::getName();

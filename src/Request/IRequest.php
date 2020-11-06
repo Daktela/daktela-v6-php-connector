@@ -1,8 +1,6 @@
-<?php
+<?php declare(strict_types = 1);
 
-declare(strict_types=1);
-
-namespace Daktela\Request;
+ namespace Daktela\Request;
 
 use Daktela\BaseDaktela;
 use Daktela\Response\Response;
@@ -26,17 +24,12 @@ interface IRequest
 
     public function setFilter(array $filter, string $logic = BaseDaktela::FILTER_LOGIC_AND): IRequest;
 
-    /**
-     * @return Response
-     * @throws InvalidArgumentException
-     */
+    /** @throwsInvalidArgumentExceptionn */
     public function find(): Response;
 
-    /**
-     * @return Response
-     * @throws InvalidArgumentException
-     */
+    /** @throwsInvalidArgumentExceptionn */
     public function get(string $name): Response;
 
     public function getPathMask(): string;
+
 }

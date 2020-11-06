@@ -1,12 +1,12 @@
 <?php
 
-declare(strict_types = 1);
+declare(strict_types=1);
 
 namespace Daktela\Request;
 
 use Daktela\BaseDaktela;
+use Daktela\Request\Filter;
 use Daktela\Response\Model\User as UserModel;
-use UnexpectedValueException;
 
 /** @author Petr Kalíšek <petr.kalisek@daktela.com> */
 class Users extends BaseDaktela
@@ -33,34 +33,30 @@ class Users extends BaseDaktela
 
     /**
      * @param string $name
-     * @return UserModel|null
-     * @throws UnexpectedValueException
-
-    public static function getUser(string $name): ?UserModel
-    {
-        try {
-            $result = parent::getJsonData((string)self::METHOD . '/' . $name);
-
-            return UserModel::create($result);
-        } catch (NotFoundException | UnexpectedValueException $ex) {
-            throw new UnexpectedValueException($ex->getMessage(), $ex->getCode());
-        }
-    }*/
+     * @return User|null
+     * @throws UnexpectedValueException public static function getUser(string $name): ?UserModel
+ *     {
+ *         try {
+ *             $result = parent::getJsonData((string)self::METHOD . '/' . $name);
+ * 
+ *             return UserModel::create($result);
+ *         } catch (NotFoundException | UnexpectedValueException $ex) {
+ *             throw new UnexpectedValueException($ex->getMessage(), $ex->getCode());
+ *         }
+ *     }*/
 /**
      * @param Filter $filter
-     * @return UserModel
-     * @throws UnexpectedValueException
-
-    public static function findUser(Filter $filter): UserModel
-    {
-        try {
-            $result = parent::getJsonData((string)self::METHOD, $filter->toArray());
-
-            return UserModel::create($result);
-        } catch (NotFoundException | UnexpectedValueException $ex) {
-            throw new UnexpectedValueException($ex->getMessage(), $ex->getCode());
-        }
-    }
+     * @return User
+     * @throws UnexpectedValueException public static function findUser(Filter $filter): UserModel
+ *     {
+ *         try {
+ *             $result = parent::getJsonData((string)self::METHOD, $filter->toArray());
+ * 
+ *             return UserModel::create($result);
+ *         } catch (NotFoundException | UnexpectedValueException $ex) {
+ *             throw new UnexpectedValueException($ex->getMessage(), $ex->getCode());
+ *         }
+ *     }
  */
 
 }

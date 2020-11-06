@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Daktela\Response;
@@ -8,9 +9,7 @@ use Daktela\Type\Json;
 use Exceptions\Data\NotFoundException;
 use InvalidArgumentException;
 
-/**
- * @author Petr Kalíšek <petr.kalisek@daktela.com>
- */
+/** @author Petr Kalíšek <petr.kalisek@daktela.com> */
 class Result extends Json
 {
 
@@ -19,33 +18,36 @@ class Result extends Json
      */
     private $entityDataClass = null;
 
-    public static function create(object $data, string $entityDataClass = null): self
+    public static function create(object $data, ?string $entityDataClass = null): self
     {
         $object = parent::create($data);
         $object->setDataEntityClass($entityDataClass);
+
         return $object;
     }
 
     public function setDataEntityClass(string $entityDataClass): Result
     {
         $this->entityDataClass = $entityDataClass;
+
         return $this;
     }
 
-    
     public function getData(): array
     {
         $data = parent::getData();
-        if (!is_array($data)) {
-            throw new InvalidArgumentException(sprintf('Data in %s are not array', __CLASS__));
+
+        if (!\is_array($data)) {
+            throw new InvalidArgumentException(\sprintf('Data in %s are not array', self::class));
         }
 
-        if ($this->entityDataClass === null) {
+        if (null === $this->entityDataClass) {
             return $data;
         }
 
-        return array_map(function ($o) {
+        return \array_map(function ($o) {
             $entityDataClass = $this->entityDataClass;
+
             return $entityDataClass::create($o);
         }, $data);
     }
@@ -61,6 +63,5 @@ class Result extends Json
             return null;
         }
     }
-
 
 }

@@ -1,9 +1,10 @@
 <?php
 
-declare(strict_types = 1);
+declare(strict_types=1);
 
 namespace Daktela\Response\Model;
 
+use Daktela\Response\Model\Ticket;
 use Daktela\Type\Json;
 use Exceptions\Data\NotFoundException;
 
@@ -11,10 +12,7 @@ use Exceptions\Data\NotFoundException;
 class Activity extends Json
 {
 
-    /**
-     * @return Ticket
-     * @throws NotFoundException
-     */
+    /** @throws NotFoundException */
     public function getTicket(): Ticket
     {
         return Ticket::create(parent::getTicket());

@@ -20,7 +20,7 @@
     "require": {
         "php": ">=7.3",
         "crazycodr/standard-exceptions": "^2.4",
-        "guzzlehttp/guzzle": "^7.2"
+        "guzzlehttp/guzzle": "^6.5"
     },
     "autoload": {
         "psr-4": {

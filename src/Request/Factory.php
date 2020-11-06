@@ -14,7 +14,7 @@ use function ucfirst;
 class Factory
 {
 
-    private const REQUEST_NAMESPACE = 'App\Lib\Daktela\Request';
+    private const REQUEST_NAMESPACE = 'Daktela\Request';
 
     public static function createRequest(string $apiPoint): IRequest
     {

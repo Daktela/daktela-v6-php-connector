@@ -4,7 +4,11 @@ declare(strict_types = 1);
 
 namespace Daktela\Request;
 
+use Daktela\Request\IRequest;
 use InvalidArgumentException;
+use function class_exists;
+use function sprintf;
+use function ucfirst;
 
 /** @author Petr Kalíšek <petr.kalisek@daktela.com> */
 class Factory
@@ -14,11 +18,11 @@ class Factory
 
     public static function createRequest(string $apiPoint): IRequest
     {
-        $apiPoint = \ucfirst($apiPoint);
+        $apiPoint = ucfirst($apiPoint);
         $apiClass = self::REQUEST_NAMESPACE . '\\' . $apiPoint;
 
-        if (!\class_exists($apiClass)) {
-            throw new InvalidArgumentException(\sprintf('Class %s for api point %s not exists', $apiClass, $apiPoint));
+        if (!class_exists($apiClass)) {
+            throw new InvalidArgumentException(sprintf('Class %s for api point %s not exists', $apiClass, $apiPoint));
         }
 
         return new $apiClass();

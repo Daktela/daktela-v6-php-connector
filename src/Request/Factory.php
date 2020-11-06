@@ -1,6 +1,6 @@
 <?php
 
-declare(strict_types = 1);
+declare(strict_types=1);
 
 namespace Daktela\Request;
 
@@ -16,6 +16,11 @@ class Factory
 
     private const REQUEST_NAMESPACE = 'Daktela\Request';
 
+    /**
+     * @var IRequest[]
+     */
+    private static $instances = [];
+
     public static function createRequest(string $apiPoint): IRequest
     {
         $apiPoint = ucfirst($apiPoint);
@@ -25,6 +30,11 @@ class Factory
             throw new InvalidArgumentException(sprintf('Class %s for api point %s not exists', $apiClass, $apiPoint));
         }
 
-        return new $apiClass();
+        if (!isset(self::$instances[$apiClass])) {
+            self::$instances[$apiClass] = new $apiClass();
+        }
+
+        return self::$instances[$apiClass];
     }
+
 }

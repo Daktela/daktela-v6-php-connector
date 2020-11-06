@@ -1,6 +1,6 @@
 <?php
 
-declare(strict_types = 1);
+declare(strict_types=1);
 
 namespace Daktela\Response\Model;
 
@@ -15,12 +15,12 @@ class Ticket extends Json
 {
 
     /**
-     * @return int
+     * @return string
      * @throws NotFoundException
      */
-    public function getName(): int
+    public function getName(): string
     {
-        return (int) parent::getName();
+        return (string) parent::getName();
     }
 
 }

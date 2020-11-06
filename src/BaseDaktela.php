@@ -24,6 +24,14 @@ abstract class BaseDaktela implements IRequest
     const FILTER_LOGIC_AND = 'and';
     const FILTER_OPERATOR_EQ = 'eq';
 
+    /**
+     * @var string
+     */
+    private $accessToken = null;
+
+    /**
+     * @var array
+     */
     private $queryData = [
         'accessToken' => null,
     ];
@@ -54,8 +62,7 @@ abstract class BaseDaktela implements IRequest
 
         $this->client = new Client($config);
 
-
-        $this->queryData['accessToken'] = Config::getAccessToken();
+        $this->accessToken = Config::getAccessToken();
     }
 
     abstract public function getMethod(): string;
@@ -123,9 +130,11 @@ abstract class BaseDaktela implements IRequest
                     'GET',
                     sprintf(Config::API_PATH_MASK, $this->getMethod()),
                     [
-                        'query' => $this->queryData,
+                        'query' => array_merge($this->queryData, ['accessToken' => Config::getAccessToken()]),
                     ]
             );
+
+            $this->onResponse();
 
             return Response::create(json_decode((string) $result->getBody()), $this->getModelClass());
         } catch (ClientException $ex) {
@@ -140,9 +149,12 @@ abstract class BaseDaktela implements IRequest
                     'GET',
                     sprintf(Config::API_PATH_MASK, sprintf($this->getPathMask(), $name)),
                     [
-                        'query' => $this->queryData,
+                        'query' => array_merge($this->queryData, ['accessToken' => Config::getAccessToken()]),
                     ]
             );
+
+            $this->onResponse();
+
             return Response::create(json_decode((string) $result->getBody()), $this->getModelClass());
         } catch (ClientException $ex) {
             throw new InvalidArgumentException($ex->getMessage(), $ex->getCode(), $ex);
@@ -157,13 +169,43 @@ abstract class BaseDaktela implements IRequest
                     sprintf(Config::API_PATH_MASK, $this->getMethod()),
                     [
                         'form_params' => $this->attributes,
-                        'query' => $this->queryData,
+                        'query' => array_merge($this->queryData, ['accessToken' => Config::getAccessToken()]),
                     ]
             );
+
+            $this->onResponse();
+
             return Response::create(json_decode((string) $result->getBody()), $this->getModelClass());
         } catch (ClientException $ex) {
             throw new InvalidArgumentException($ex->getMessage(), $ex->getCode(), $ex);
         }
+    }
+
+    public function put(string $name): Response
+    {
+        try {
+            $result = $this->client->request(
+                    'PUT',
+                    sprintf(Config::API_PATH_MASK, sprintf($this->getPathMask(), $name)),
+                    [
+                        'form_params' => $this->attributes,
+                        'query' => array_merge($this->queryData, ['accessToken' => Config::getAccessToken()]),
+                        'debug' => true,
+                    ]
+            );
+
+            $this->onResponse();
+
+            return Response::create(json_decode((string) $result->getBody()), $this->getModelClass());
+        } catch (ClientException $ex) {
+            throw new InvalidArgumentException($ex->getMessage(), $ex->getCode(), $ex);
+        }
+    }
+
+    private function onResponse(): void
+    {
+        $this->attributes = [];
+        $this->queryData = [];
     }
 
     /*

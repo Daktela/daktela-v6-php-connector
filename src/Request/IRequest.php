@@ -20,6 +20,10 @@ interface IRequest
 
     public function addSort(string $field, string $dir = BaseDaktela::DIRECTION_ASC): IRequest;
 
+    public function addAttribute(string $key, string $value): IRequest;
+
+    public function addAttributes(array $attributes): IRequest;
+
     public function setFilter(array $filter, string $logic = BaseDaktela::FILTER_LOGIC_AND): IRequest;
 
     /**

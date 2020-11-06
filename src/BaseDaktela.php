@@ -39,6 +39,11 @@ abstract class BaseDaktela implements IRequest
     private $supportedFilterLogics = [self::FILTER_LOGIC_OR, self::FILTER_LOGIC_AND];
 
     /**
+     * @var string[]
+     */
+    private $attributes = [];
+
+    /**
      * @var Client|null
      */
     private $client = null;
@@ -86,6 +91,18 @@ abstract class BaseDaktela implements IRequest
         return $this;
     }
 
+    public function addAttribute(string $key, string $value): IRequest
+    {
+        $this->attributes[$key] = $value;
+        return $this;
+    }
+
+    public function addAttributes(array $attributes): IRequest
+    {
+        $this->attributes = array_merge($this->attributes, $attributes);
+        return $this;
+    }
+
     public function setFilter(array $filter, string $logic = self::FILTER_LOGIC_AND): IRequest
     {
 
@@ -126,6 +143,24 @@ abstract class BaseDaktela implements IRequest
                     [
                         'debug' => true,
                         'query' => $this->queryData,
+                    ]
+            );
+            return Response::create(json_decode((string) $result->getBody()), $this->getModelClass());
+        } catch (ClientException $ex) {
+            throw new InvalidArgumentException($ex->getMessage(), $ex->getCode(), $ex);
+        }
+    }
+
+    public function post(): Response
+    {
+        try {
+            $result = $this->client->request(
+                    'POST',
+                    sprintf(Config::API_PATH_MASK, $this->getMethod()),
+                    [
+                        'form_params' => $this->attributes,
+                        'query' => $this->queryData,
+                        'debug' => true,
                     ]
             );
             return Response::create(json_decode((string) $result->getBody()), $this->getModelClass());

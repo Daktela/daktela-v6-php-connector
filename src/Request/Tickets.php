@@ -14,7 +14,7 @@ class Tickets extends BaseDaktela
 {
 
     public const METHOD = 'tickets';
-    public const STATUS_OPEN = 'OPEN';
+    public const STAGE_OPEN = 'OPEN';
     public const PRIORITY_LOW = 'LOW';
     public const GET_PATH_MASK = 'tickets/%s';
 

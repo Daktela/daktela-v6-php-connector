@@ -123,7 +123,6 @@ abstract class BaseDaktela implements IRequest
                     'GET',
                     sprintf(Config::API_PATH_MASK, $this->getMethod()),
                     [
-                        'debug' => true,
                         'query' => $this->queryData,
                     ]
             );
@@ -141,7 +140,6 @@ abstract class BaseDaktela implements IRequest
                     'GET',
                     sprintf(Config::API_PATH_MASK, sprintf($this->getPathMask(), $name)),
                     [
-                        'debug' => true,
                         'query' => $this->queryData,
                     ]
             );
@@ -160,7 +158,6 @@ abstract class BaseDaktela implements IRequest
                     [
                         'form_params' => $this->attributes,
                         'query' => $this->queryData,
-                        'debug' => true,
                     ]
             );
             return Response::create(json_decode((string) $result->getBody()), $this->getModelClass());

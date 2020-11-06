@@ -9,7 +9,7 @@ use InvalidArgumentException;
 use stdClass;
 
 /** @author Petr Kalíšek <petr.kalisek@daktela.com> */
-abstract class AbstractType
+abstract class BaseType
 {
 
     public const METHOD_GET = 'get';

@@ -125,7 +125,6 @@ abstract class BaseDaktela implements IRequest
                     'query' => $this->queryData,
                 ]
         );
-
         return Response::create(json_decode((string) $result->getBody()), $this->getModelClass());
     }
 

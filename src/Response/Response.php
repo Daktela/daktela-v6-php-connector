@@ -1,6 +1,6 @@
 <?php
 
-declare(strict_types=1);
+declare(strict_types = 1);
 
 namespace Daktela\Response;
 
@@ -8,9 +8,7 @@ use Daktela\Response\Model\User as UserModel;
 use Daktela\Type\Json;
 use Exceptions\Data\NotFoundException;
 
-/**
- * @author Petr Kalíšek <petr.kalisek@daktela.com>
- */
+/** @author Petr Kalíšek <petr.kalisek@daktela.com> */
 class Response extends Json
 {
 
@@ -19,16 +17,18 @@ class Response extends Json
      */
     private $entityDataClass = null;
 
-    public static function create(object $data, string $entityDataClass = null): self
+    public static function create(object $data, ?string $entityDataClass = null): self
     {
         $object = parent::create($data);
         $object->setDataEntityClass($entityDataClass);
+
         return $object;
     }
 
     public function setDataEntityClass($entityDataClass): Response
     {
         $this->entityDataClass = $entityDataClass;
+
         return $this;
     }
 
@@ -42,15 +42,12 @@ class Response extends Json
     }
 
     /**
-     * @return UserModel|null
+     * @return UserModel
+     * @throws NotFoundException
      */
-    public function getUser(): ?UserModel
+    public function getUser(): UserModel
     {
-        try {
-            return UserModel::create(parent::getResult());
-        } catch (NotFoundException $ex) {
-            return null;
-        }
+        return UserModel::create(parent::getResult());
     }
 
 }

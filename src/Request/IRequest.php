@@ -21,8 +21,6 @@ interface IRequest
 
     public function setFilter(array $filter, string $logic = BaseDaktela::FILTER_LOGIC_AND): IRequest;
 
-    //public function getResult(): Response;
-
     public function find(): Response;
 
     public function get(string $name): Response;

@@ -56,13 +56,20 @@ abstract class BaseDaktela implements IRequest
      */
     private $client = null;
 
-    public function __construct(array $config = array())
+    /**
+     * @var IConfig|null
+     */
+    private $config = null;
+
+    public function __construct(IConfig $config)
     {
-        $config['base_uri'] = self::getInstanceHost();
+        $this->config = $config;
+        $this->accessToken = $this->configgetAccessToken();
+
+        $_config = [];
+        $_config['base_uri'] = $this->getInstanceHost();
 
         $this->client = new Client($config);
-
-        $this->accessToken = Config::getAccessToken();
     }
 
     abstract public function getMethod(): string;
@@ -190,7 +197,6 @@ abstract class BaseDaktela implements IRequest
                     [
                         'form_params' => $this->attributes,
                         'query' => array_merge($this->queryData, ['accessToken' => Config::getAccessToken()]),
-                        'debug' => true,
                     ]
             );
 
@@ -238,10 +244,6 @@ abstract class BaseDaktela implements IRequest
       $this->result;
       } */
 
-    public static function getInstanceHost(): string
-    {
-        return Config::getInstanceUri();
-    }
 
     /**
      * @deprecated refactor to post() method

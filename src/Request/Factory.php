@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Daktela\Request;
 
+use Daktela\Config;
+use Daktela\IConfig;
 use Daktela\Request\IRequest;
 use InvalidArgumentException;
 use function class_exists;
@@ -21,7 +23,7 @@ class Factory
      */
     private static $instances = [];
 
-    public static function createRequest(string $apiPoint): IRequest
+    public static function createRequest(string $apiPoint, ?IConfig $config = null): IRequest
     {
         $apiPoint = ucfirst($apiPoint);
         $apiClass = self::REQUEST_NAMESPACE . '\\' . $apiPoint;
@@ -30,8 +32,12 @@ class Factory
             throw new InvalidArgumentException(sprintf('Class %s for api point %s not exists', $apiClass, $apiPoint));
         }
 
+        if ($config === null) {
+            $config = new Config();
+        }
+
         if (!isset(self::$instances[$apiClass])) {
-            self::$instances[$apiClass] = new $apiClass();
+            self::$instances[$apiClass] = new $apiClass($config);
         }
 
         return self::$instances[$apiClass];

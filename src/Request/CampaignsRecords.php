@@ -57,7 +57,7 @@ class CampaignsRecords extends BaseDaktela
      * @throws \Daktela\Request\UnexpectedValueException public static function callCampaignsRecord(string $message, string $recipient, string $queue, int $daktelaTicketId = null): ?DaktelaTicket
  *     {
  * 
- *         // {"queue": "2368", "number": "773794604", "customFields": {"tts_jazyk": ["CZ"], "texttospeech": ["TEXT"]}}
+    *         // {"queue": "2368", "number": "773794604", "customFields": {"tts_jazyk": ["CZ"], "texttospeech": ["TEXT"]}}
  * 
  *         return self::createCampaignsRecord([
  *                     'queue' => $queue,

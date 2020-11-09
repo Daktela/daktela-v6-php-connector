@@ -41,7 +41,7 @@ abstract class BaseDaktela implements IRequest
     /**
      * @var string[]
      */
-    private $supportedFilterLogics = [Filter::FILTER_LOGIC_OR, Filter::FILTER_LOGIC_AND];
+    private $supportedFilterLogics = [Filter::LOGIC_OR, Filter::LOGIC_AND];
 
     /**
      * @var string[]
@@ -114,7 +114,7 @@ abstract class BaseDaktela implements IRequest
         return $this;
     }
 
-    public function setFilter(array $filter, string $logic = Filter::FILTER_LOGIC_AND): IRequest
+    public function setFilter(array $filter, string $logic = Filter::LOGIC_AND): IRequest
     {
 
         $logicLower = strtolower($logic);

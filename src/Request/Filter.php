@@ -13,6 +13,8 @@ class Filter
 {
 
     const OPERATOR_EQ = 'eq';
+    const LOGIC_OR = 'or';
+    const LOGIC_AND = 'and';
 
     private $filter = ['logic' => 'and', 'filters' => []];
 

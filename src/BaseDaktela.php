@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Daktela;
 
+use Daktela\Request\Filter;
 use Daktela\Request\IRequest;
 use Daktela\Response\Response;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ClientException;
 use InvalidArgumentException;
-use UnexpectedValueException;
 use function json_decode;
 
 /**
@@ -20,10 +20,7 @@ abstract class BaseDaktela implements IRequest
 
     const DIRECTION_ASC = 'asc';
     const DIRECTION_DESC = 'desc';
-    const FILTER_LOGIC_OR = 'or';
-    const FILTER_LOGIC_AND = 'and';
-    const FILTER_OPERATOR_EQ = 'eq';
-
+    
     /**
      * @var string
      */
@@ -44,7 +41,7 @@ abstract class BaseDaktela implements IRequest
     /**
      * @var string[]
      */
-    private $supportedFilterLogics = [self::FILTER_LOGIC_OR, self::FILTER_LOGIC_AND];
+    private $supportedFilterLogics = [Filter::FILTER_LOGIC_OR, Filter::FILTER_LOGIC_AND];
 
     /**
      * @var string[]
@@ -67,9 +64,9 @@ abstract class BaseDaktela implements IRequest
         $this->accessToken = $config->getAccessToken();
 
         $_config = [];
-        $_config['base_uri'] = $config->getInstanceHost();
+        $_config['base_uri'] = $config->getInstanceUri();
 
-        $this->client = new Client($config);
+        $this->client = new Client($_config);
     }
 
     abstract public function getMethod(): string;
@@ -117,7 +114,7 @@ abstract class BaseDaktela implements IRequest
         return $this;
     }
 
-    public function setFilter(array $filter, string $logic = self::FILTER_LOGIC_AND): IRequest
+    public function setFilter(array $filter, string $logic = Filter::FILTER_LOGIC_AND): IRequest
     {
 
         $logicLower = strtolower($logic);
@@ -214,109 +211,4 @@ abstract class BaseDaktela implements IRequest
         $this->queryData = [];
     }
 
-    /*
-      public function getResult(): Response
-      {
-
-      $result = $this->request(
-      'GET',
-      $this->getUrlPath(),
-      [
-      'query' => ['accessToken' => Config::getAccessToken(),
-      'skip' => $this->skip,
-      'take' => $this->limit,
-      'sort' => $this->sort,
-      ],
-      'debug' => true,
-
-      ]
-      );
-
-
-      var_dump((string) $result->getBody());
-
-      echo "<hr/>";
-
-      var_dump($this);
-      if ($this->result === null) {
-
-      }
-      $this->result;
-      } */
-
-
-    /**
-     * @deprecated refactor to post() method
-     *
-     * @param string $method
-     * @param array $data
-     * @param array $additional
-     * @return Response|null
-     * @throws UnexpectedValueException
-
-      public static function postData(string $method, array $data = [], array $additional = []): ?Response
-      {
-      $response = V6::postData(self::getInstanceHost(), Config::getAccessToken(), $method, $data, $additional);
-
-      if (property_exists($response, 'error') && !empty($response->error)) {
-      //is_array($response->error) && count($response->error) > 0) {
-      throw new UnexpectedValueException(json_encode($response->error));
-      }
-
-      return ($response === false ? null : Response::create($response));
-      }
-     */
-    /**
-     * @deprecated refactor to get() method
-     *
-     * @param string $method
-     * @param array $filter
-     * @param array $additional
-     * @param bool $countOnly
-     * @return Response|null
-     * @throws UnexpectedValueException
-
-      public static function getJsonData(string $method, array $filter = [], array $additional = [], bool $countOnly = false): ?Response
-      {
-      $response = V6::getData(self::getInstanceHost(), DaktelaConfig::getAccessToken(), $method, $filter, $additional, $countOnly);
-
-      Log::info($response);
-
-      if (is_array($response)) {
-      if (count($response) > 1) {
-      throw new UnexpectedValueException('Not completed ... result array with more items (is collection needed)');
-      }
-
-      if (isset($response[0])) {
-      $response = $response[0];
-      }
-      }
-
-      if (($response !== false) && property_exists($response, 'error') && !empty($response->error)) {
-      //        if (isset($response->error) && is_array($response->error) && count($response->error) > 0) {
-      throw new UnexpectedValueException(json_encode($response->error));
-      }
-
-      return ($response === false ? null : Response::create($response));
-      }
-     */
-    /**
-     * @deprecated refactor to put() method
-     *
-     * @param string $method
-     * @param array $data
-     * @param array $additional
-     * @return Response|null
-
-      public static function putData(string $method, array $data = [], array $additional = []): ?Response
-      {
-      $response = V6::putData(self::getInstanceHost(), DaktelaConfig::getAccessToken(), $method, $data, $additional);
-      if (property_exists($response, 'error') && !empty($response->error)) {
-      //        if (is_array($response->error) && count($response->error) > 0) {
-      throw new UnexpectedValueException(json_encode($response->error));
-      }
-
-      return ($response === false ? null : Response::create($response));
-      }
-     */
 }

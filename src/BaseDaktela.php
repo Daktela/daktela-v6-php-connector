@@ -64,7 +64,7 @@ abstract class BaseDaktela implements IRequest
     public function __construct(IConfig $config)
     {
         $this->config = $config;
-        $this->accessToken = $this->configgetAccessToken();
+        $this->accessToken = $this->getAccessToken();
 
         $_config = [];
         $_config['base_uri'] = $this->getInstanceHost();

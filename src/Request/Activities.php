@@ -12,10 +12,6 @@ class Activities extends BaseDaktela
 {
 
     public const METHOD = 'activities';
-    public const TYPE_EMAIL = 'EMAIL';
-    public const TYPE_SMS = 'SMS';
-    public const ACTION_OPEN = 'OPEN';
-    public const ACTION_CLOSE = 'CLOSE';
 
     public function getMethod(): string
     {

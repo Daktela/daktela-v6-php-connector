@@ -90,7 +90,7 @@ class Client
 
     private function executeReadAll(ReadRequest $request): Response
     {
-        $response = new Response();
+        $response = new Response([], 0, [], 0);
         for ($i = 0; $i < self::READ_LIMIT; $i++) {
             $queryParams = ['skip' => ($i * $request->getTake()), 'take' => $request->getTake(), 'filter' => $request->getFilters(), 'sort' => $request->getSorts()];
             $currentResponse = $this->apiCommunicator->sendRequest("GET", $request->getModel(), $queryParams);
@@ -99,7 +99,12 @@ class Client
                 return $currentResponse;
             }
 
-            $data = array_merge($response->getData(), $currentResponse->getData());
+            $data = [];
+            if (is_array($currentResponse->getData())) {
+                $data = array_merge($response->getData(), $currentResponse->getData());
+            } elseif (!$request->isSkipErrorRequests()) {
+                return $currentResponse;
+            }
             $response = new Response($data, $currentResponse->getTotal(), $currentResponse->getErrors(), $currentResponse->getHttpStatus());
 
             //If returned less than take, it is the last page

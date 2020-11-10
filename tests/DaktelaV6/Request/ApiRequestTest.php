@@ -72,6 +72,32 @@ class ApiRequestTest extends TestCase
         self::assertEquals("test_read1_" . $this->hash, $responseRead->getData()[0]->name);
     }
 
+    public function testReadAllRequest()
+    {
+        $client = new Client($this->url, $this->accessToken);
+        $request = new CreateRequest("CampaignsRecords");
+
+        $request->addStringAttribute("name", "test_read3_" . $this->hash);
+        $request->addStringAttribute("number", "+420111222333");
+        $request->addAttributes(["action" => 5, "queue" => 311831447]);
+        $response = $client->execute($request);
+        self::assertEquals(201, $response->getHttpStatus());
+
+        $requestRead = new ReadRequest("CampaignsRecords");
+        $requestRead->setRequestType(ReadRequest::TYPE_ALL);
+        $requestRead->addFilter("number", "eq", "+420111222333");
+        $requestRead->addFilter("name", "eq", "test_read3_" . $this->hash);
+        $responseRead = $client->execute($requestRead);
+        self::assertNotNull($responseRead->getData());
+        self::assertNotEmpty($responseRead->getData());
+        self::assertEmpty($responseRead->getErrors());
+        self::assertEquals(200, $responseRead->getHttpStatus());
+        self::assertGreaterThan(0, $responseRead->getData());
+        self::assertArrayHasKey(0, $responseRead->getData());
+        self::assertObjectHasAttribute("name", $responseRead->getData()[0]);
+        self::assertEquals("test_read3_" . $this->hash, $responseRead->getData()[0]->name);
+    }
+
     public function testReadSingleRequest()
     {
         $client = new Client($this->url, $this->accessToken);

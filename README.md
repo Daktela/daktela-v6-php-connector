@@ -59,6 +59,23 @@ $request = RequestFactory::buildReadRequest("CampaignsRecords")
 $response = $client->execute($request);
 ```
 
+Standard loading reads always entities of one page. For pagination use the `setTake()` and `setSkip()` methods.
+```php
+$request = RequestFactory::buildReadRequest("CampaignsRecords")
+    ->setTake(1000)
+    ->setSkip(10);
+$response = $client->execute($request);
+```
+
+If you don't want to handle pagination, use the following request type to read all records:
+```php
+$request = RequestFactory::buildReadRequest("CampaignsRecords")
+    ->setRequestType(ReadRequest::TYPE_ALL)
+    ->addFilter("created", "gte", "2020-11-01 00:00:00")
+    ->addSort("created", "asc");
+$response = $client->execute($request);
+```
+
 You can use different methods for defining filters:
 ```php
 $request = RequestFactory::buildReadRequest("CampaignsRecords")

@@ -42,8 +42,8 @@ $response = $request->getResponse();
 ## Operations
 The allowed operations serve for CRUD manipulation with objects. Each operation uses the builder pattern and corresponds to specific REST action.
 
-### Getting entities
-In order to list all objects for specific entities use the `find()` method:
+### Reading entities
+In order to list all objects for specific entities use the `execute()` method:
 ```php
 $request = $client->buildReadRequest("CampaignsRecords")
     ->addFilter("created", "gte", "2020-11-01 00:00:00")

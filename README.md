@@ -28,6 +28,7 @@ $response = $client->execute($request);
 ### 2. Using static access methods
 ```php
 use Daktela\DaktelaV6\Client;
+use Daktela\DaktelaV6\RequestFactory;
 
 $instance = "https://mydaktela.daktela.com/";
 $accessToken = "0b7cb37b6c2b96a4b68128b212c799056564e0f2";

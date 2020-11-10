@@ -134,7 +134,7 @@ abstract class BaseDaktela implements IRequest
                     'GET',
                     sprintf(Config::API_PATH_MASK, $this->getMethod()),
                     [
-                        'query' => array_merge($this->queryData, ['accessToken' => Config::getAccessToken()]),
+                        'query' => array_merge($this->queryData, ['accessToken' => $this->accessToken]),
                     ]
             );
 
@@ -153,7 +153,7 @@ abstract class BaseDaktela implements IRequest
                     'GET',
                     sprintf(Config::API_PATH_MASK, sprintf($this->getPathMask(), $name)),
                     [
-                        'query' => array_merge($this->queryData, ['accessToken' => Config::getAccessToken()]),
+                        'query' => array_merge($this->queryData, ['accessToken' => $this->accessToken]),
                     ]
             );
 
@@ -173,7 +173,7 @@ abstract class BaseDaktela implements IRequest
                     sprintf(Config::API_PATH_MASK, $this->getMethod()),
                     [
                         'form_params' => $this->attributes,
-                        'query' => array_merge($this->queryData, ['accessToken' => Config::getAccessToken()]),
+                        'query' => array_merge($this->queryData, ['accessToken' => $this->accessToken]),
                     ]
             );
 
@@ -193,7 +193,7 @@ abstract class BaseDaktela implements IRequest
                     sprintf(Config::API_PATH_MASK, sprintf($this->getPathMask(), $name)),
                     [
                         'form_params' => $this->attributes,
-                        'query' => array_merge($this->queryData, ['accessToken' => Config::getAccessToken()]),
+                        'query' => array_merge($this->queryData, ['accessToken' => $this->accessToken]),
                     ]
             );
 

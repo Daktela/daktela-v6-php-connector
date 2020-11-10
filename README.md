@@ -19,7 +19,7 @@ $instance = "https://mydaktela.daktela.com/";
 $accessToken = "0b7cb37b6c2b96a4b68128b212c799056564e0f2";
 
 $client = new V6($instance, $accessToken);
-$request = $client->createGetRequest("Users")
+$request = $client->buildReadRequest("Users")
     ->addFilter("username", "eq", "admin")
     ->execute();
 $response = $request->getResponse();
@@ -32,7 +32,8 @@ use Daktela\DaktelaV6\V6;
 $instance = "https://mydaktela.daktela.com/";
 $accessToken = "0b7cb37b6c2b96a4b68128b212c799056564e0f2";
 
-$request = V6::getInstance($instance, $accessToken)->createGetRequest("Users")
+$request = V6::getInstance($instance, $accessToken)
+    ->buildReadRequest("Users")
     ->addFilter("username", "eq", "admin")
     ->execute();
 $response = $request->getResponse();

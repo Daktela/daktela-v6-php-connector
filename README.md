@@ -1,5 +1,4 @@
 # Daktela V6 PHP Connector
-# Daktela V6 PHP Connector
 Daktela V6 PHP Connector is a library that enables your PHP application to connecto to your Daktela V6 REST API.
 
 ## Setup
@@ -33,7 +32,7 @@ use Daktela\DaktelaV6\V6;
 $instance = "https://mydaktela.daktela.com/";
 $accessToken = "0b7cb37b6c2b96a4b68128b212c799056564e0f2";
 
-$request = V6::createGetRequest("Users")
+$request = V6::getInstance($instance, $accessToken)->createGetRequest("Users")
     ->addFilter("username", "eq", "admin")
     ->execute();
 $response = $request->getResponse();
@@ -45,17 +44,17 @@ The allowed operations serve for CRUD manipulation with objects. Each operation 
 ### Getting entities
 In order to list all objects for specific entities use the `find()` method:
 ```php
-$request = $client->createGetRequest("CampaignsRecords")
+$request = $client->buildReadRequest("CampaignsRecords")
     ->addFilter("created", "gte", "2020-11-01 00:00:00")
     ->addSort("created", "asc")
     ->execute();
 $response = $request->getResponse();
 ```
 
-In order to get one specific object for entity use the `get()` method passing the object unique name:
+In order to get one specific object for entity use the `getObjectByName()` method passing the object unique name:
 ```php
-$campaignRecord = $client->createGetRequest("CampaignsRecords")
-    ->get("records_5fa299a48ab72834012563");
+$campaignRecord = $client->buildReadRequest("CampaignsRecords")
+    ->getObjectByName("records_5fa299a48ab72834012563");
 ```
 
 You can use different methods for defining filters:

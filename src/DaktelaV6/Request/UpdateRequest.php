@@ -3,19 +3,10 @@ declare(strict_types=1);
 
 namespace Daktela\DaktelaV6\Request;
 
-use Daktela\DaktelaV6\Response\Response;
-
 class UpdateRequest extends ARequest
 {
-    private $model;
     private $attributes = [];
     private $objectName;
-
-    public function __construct(string $instance, string $accessToken, string $model)
-    {
-        parent::__construct($instance, $accessToken);
-        $this->model = $model;
-    }
 
     public function addStringAttribute(string $key, string $value): self
     {
@@ -84,11 +75,8 @@ class UpdateRequest extends ARequest
         return $this->objectName;
     }
 
-    protected function executeRequest(): Response
+    public function getAttributes()
     {
-        if (is_null($this->objectName) || empty($this->objectName)) {
-            return new Response(null, -1, ['No object name specified'], 0);
-        }
-        return $this->sendRequest("PUT", $this->model . "/" . $this->objectName, [], $this->attributes);
+        return $this->attributes;
     }
 }

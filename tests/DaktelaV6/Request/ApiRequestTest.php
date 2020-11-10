@@ -2,6 +2,7 @@
 
 namespace DaktelaV6\Request;
 
+use Daktela\DaktelaV6\Client;
 use Daktela\DaktelaV6\Request\CreateRequest;
 use Daktela\DaktelaV6\Request\DeleteRequest;
 use Daktela\DaktelaV6\Request\ReadRequest;
@@ -30,12 +31,13 @@ class ApiRequestTest extends TestCase
 
     public function testCreateRequest()
     {
-        $request = new CreateRequest($this->url, $this->accessToken, "CampaignsRecords");
+        $client = new Client($this->url, $this->accessToken);
+        $request = new CreateRequest("CampaignsRecords");
 
         $request->addStringAttribute("name", "test_create_" . $this->hash);
         $request->addStringAttribute("number", "+420111222333");
         $request->addAttributes(["action" => 5, "queue" => 311831447]);
-        $response = $request->execute();
+        $response = $client->execute($request);
         self::assertNotNull($response->getData());
         self::assertEquals(201, $response->getHttpStatus());
         self::assertObjectHasAttribute('name', $response->getData());
@@ -45,19 +47,21 @@ class ApiRequestTest extends TestCase
         self::assertEquals("+420111222333", $response->getData()->number);
     }
 
-    public function testReadMultipleRequest() {
-        $request = new CreateRequest($this->url, $this->accessToken, "CampaignsRecords");
+    public function testReadMultipleRequest()
+    {
+        $client = new Client($this->url, $this->accessToken);
+        $request = new CreateRequest("CampaignsRecords");
 
         $request->addStringAttribute("name", "test_read1_" . $this->hash);
         $request->addStringAttribute("number", "+420111222333");
         $request->addAttributes(["action" => 5, "queue" => 311831447]);
-        $response = $request->execute();
+        $response = $client->execute($request);
         self::assertEquals(201, $response->getHttpStatus());
 
-        $requestRead = new ReadRequest($this->url, $this->accessToken, "CampaignsRecords");
+        $requestRead = new ReadRequest("CampaignsRecords");
         $requestRead->addFilter("number", "eq", "+420111222333");
         $requestRead->addFilter("name", "eq", "test_read1_" . $this->hash);
-        $responseRead = $requestRead->execute();
+        $responseRead = $client->execute($requestRead);
         self::assertNotNull($responseRead->getData());
         self::assertNotEmpty($responseRead->getData());
         self::assertEmpty($responseRead->getErrors());
@@ -68,17 +72,21 @@ class ApiRequestTest extends TestCase
         self::assertEquals("test_read1_" . $this->hash, $responseRead->getData()[0]->name);
     }
 
-    public function testReadSingleRequest() {
-        $request = new CreateRequest($this->url, $this->accessToken, "CampaignsRecords");
+    public function testReadSingleRequest()
+    {
+        $client = new Client($this->url, $this->accessToken);
+        $request = new CreateRequest("CampaignsRecords");
 
         $request->addStringAttribute("name", "test_read2_" . $this->hash);
         $request->addStringAttribute("number", "+420111222333");
         $request->addAttributes(["action" => 5, "queue" => 311831447]);
-        $response = $request->execute();
+        $response = $client->execute($request);
         self::assertEquals(201, $response->getHttpStatus());
 
-        $requestRead = new ReadRequest($this->url, $this->accessToken, "CampaignsRecords");
-        $responseRead = $requestRead->getObjectByName("test_read2_" . $this->hash);
+        $requestRead = new ReadRequest("CampaignsRecords");
+        $requestRead->setRequestType(ReadRequest::TYPE_SINGLE);
+        $requestRead->setObjectName("test_read2_" . $this->hash);
+        $responseRead = $client->execute($requestRead);
         self::assertNotNull($responseRead->getData());
         self::assertNotEmpty($responseRead->getData());
         self::assertEmpty($responseRead->getErrors());
@@ -90,18 +98,19 @@ class ApiRequestTest extends TestCase
 
     public function testUpdateRequest()
     {
-        $request = new CreateRequest($this->url, $this->accessToken, "CampaignsRecords");
-        $response = $request->addStringAttribute("name", "test_update_" . $this->hash)
+        $client = new Client($this->url, $this->accessToken);
+        $request = new CreateRequest("CampaignsRecords");
+        $request->addStringAttribute("name", "test_update_" . $this->hash)
             ->addStringAttribute("number", "+420111222333")
-            ->addAttributes(["action" => 5, "queue" => 311831447])
-            ->execute();
+            ->addAttributes(["action" => 5, "queue" => 311831447]);
+        $response = $client->execute($request);
         self::assertEquals(201, $response->getHttpStatus());
 
-        $request = new UpdateRequest($this->url, $this->accessToken, "CampaignsRecords");
-        $response = $request->setObjectName("test_update_" . $this->hash)
+        $request = new UpdateRequest("CampaignsRecords");
+        $request->setObjectName("test_update_" . $this->hash)
             ->addStringAttribute("number", "+420333222111")
-            ->addAttributes(["action" => 0])
-            ->execute();
+            ->addAttributes(["action" => 0]);
+        $response = $client->execute($request);
         self::assertNotNull($response->getData());
         self::assertEquals(200, $response->getHttpStatus());
         self::assertObjectHasAttribute('name', $response->getData());
@@ -113,16 +122,17 @@ class ApiRequestTest extends TestCase
 
     public function testDeleteRequest()
     {
-        $request = new CreateRequest($this->url, $this->accessToken, "CampaignsRecords");
-        $response = $request->addStringAttribute("name", "test_delete_" . $this->hash)
+        $client = new Client($this->url, $this->accessToken);
+        $request = new CreateRequest("CampaignsRecords");
+        $request->addStringAttribute("name", "test_delete_" . $this->hash)
             ->addStringAttribute("number", "+420111222333")
-            ->addAttributes(["action" => 5, "queue" => 311831447])
-            ->execute();
+            ->addAttributes(["action" => 5, "queue" => 311831447]);
+        $response = $client->execute($request);
         self::assertEquals(201, $response->getHttpStatus());
 
-        $request = new DeleteRequest($this->url, $this->accessToken, "CampaignsRecords");
-        $response = $request->setObjectName("test_delete_" . $this->hash)
-            ->execute();
+        $request = new DeleteRequest("CampaignsRecords");
+        $request->setObjectName("test_delete_" . $this->hash);
+        $response = $client->execute($request);
         self::assertNull($response->getData());
         self::assertEquals(204, $response->getHttpStatus());
         self::assertEmpty($response->getErrors());

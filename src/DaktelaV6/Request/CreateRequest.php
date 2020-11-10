@@ -3,18 +3,13 @@ declare(strict_types=1);
 
 namespace Daktela\DaktelaV6\Request;
 
+use Daktela\DaktelaV6\Http\ApiCommunicator;
 use Daktela\DaktelaV6\Response\Response;
 
 class CreateRequest extends ARequest
 {
     private $model;
     private $attributes = [];
-
-    public function __construct(string $instance, string $accessToken, string $model)
-    {
-        parent::__construct($instance, $accessToken);
-        $this->model = $model;
-    }
 
     public function addStringAttribute(string $key, string $value): self
     {
@@ -72,8 +67,7 @@ class CreateRequest extends ARequest
         return $this;
     }
 
-    protected function executeRequest(): Response
-    {
-        return $this->sendRequest("POST", $this->model, [], $this->attributes);
+    public function getAttributes() {
+        return $this->attributes;
     }
 }

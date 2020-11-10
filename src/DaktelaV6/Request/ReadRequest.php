@@ -3,24 +3,22 @@ declare(strict_types=1);
 
 namespace Daktela\DaktelaV6\Request;
 
+use Daktela\DaktelaV6\Http\ApiCommunicator;
 use Daktela\DaktelaV6\Response\Response;
 
 class ReadRequest extends ARequest
 {
-    const READ_LIMIT = 999;
-    private $model;
+    const TYPE_MULTIPLE = 0;
+    const TYPE_SINGLE = 1;
+    const TYPE_ALL = 2;
     private $filters = [];
     private $sort = [];
     private $take = 100;
     private $skip = 0;
     private $returnAllRecords = false;
     private $skipErrorRequests = false;
-
-    public function __construct(string $instance, string $accessToken, string $model)
-    {
-        parent::__construct($instance, $accessToken);
-        $this->model = $model;
-    }
+    private $objectName = null;
+    private $requestType = self::TYPE_MULTIPLE;
 
     public function addFilter(string $field, string $operator, string $value): self
     {
@@ -144,45 +142,26 @@ class ReadRequest extends ARequest
         return $filters;
     }
 
-    private function getObjects(): Response
+    public function setObjectName(string $objectName): self
     {
-        $queryParams = ['skip' => $this->skip, 'take' => $this->take, 'filter' => $this->filters, 'sort' => $this->sort];
-        return $this->sendRequest("GET", $this->model, $queryParams);
+        $this->objectName = $objectName;
+        return $this;
     }
 
-    private function getAllObjects(): Response
+    public function getObjectName(): string
     {
-        $response = new Response();
-        for ($i = 0; $i < self::READ_LIMIT; $i++) {
-            $queryParams = ['skip' => ($i * $this->take), 'take' => $this->take, 'filter' => $this->filters, 'sort' => $this->sort];
-            $currentResponse = $this->sendRequest("GET", $this->model, $queryParams);
-
-            if (!empty($currentResponse->getErrors()) && !$this->skipErrorRequests) {
-                return $currentResponse;
-            }
-
-            $data = array_merge($response->getData(), $currentResponse->getData());
-            $response = new Response($data, $currentResponse->getTotal(), $currentResponse->getErrors(), $currentResponse->getHttpStatus());
-
-            //If returned less than take, it is the last page
-            if (count($currentResponse->getData()) < $this->take) {
-                break;
-            }
-        }
-        return $response;
+        return $this->objectName;
     }
 
-    public function getObjectByName(string $objectName): Response
+    public function setRequestType(int $requestType): self
     {
-        return $this->sendRequest("GET", $this->model . "/" . $objectName);
+        $this->requestType = $requestType;
+        return $this;
     }
 
-    protected function executeRequest(): Response
+    public function getRequestType(): int
     {
-        if ($this->returnAllRecords) {
-            return $this->getAllObjects();
-        }
-        return $this->getObjects();
+        return $this->requestType;
     }
 
 }

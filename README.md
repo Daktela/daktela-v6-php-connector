@@ -81,7 +81,7 @@ $response = $client->execute($request);
 ### Updating entities
 ```php
 $request = RequestFactory::buildUpdateRequest("CampaignsRecords")
-    ->setObject("records_5fa299a48ab72834012563")
+    ->setObjectName("records_5fa299a48ab72834012563")
     ->addAttribute("number", "00420226211245");
 $response = $client->execute($request);
 ```
@@ -89,7 +89,7 @@ $response = $client->execute($request);
 ### Deleting entities
 ```php
 $request = RequestFactory::buildDeleteRequest("CampaignsRecords")
-    ->setObject("records_5fa299a48ab72834012563");
+    ->setObjectName("records_5fa299a48ab72834012563");
 $response = $client->execute($request);
 ```
 

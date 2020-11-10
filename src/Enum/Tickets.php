@@ -9,6 +9,8 @@ namespace Daktela\Enum;
  */
 class Tickets
 {
+
+    public const STAGE_WAIT = 'WAIT';
     public const STAGE_OPEN = 'OPEN';
     public const PRIORITY_LOW = 'LOW';
 

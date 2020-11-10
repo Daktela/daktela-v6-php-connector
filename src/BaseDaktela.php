@@ -127,6 +127,10 @@ abstract class BaseDaktela implements IRequest
         return $this;
     }
 
+    /**
+     * @return Response
+     * @throws InvalidArgumentException
+     */
     public function find(): Response
     {
         try {
@@ -146,6 +150,11 @@ abstract class BaseDaktela implements IRequest
         }
     }
 
+    /**
+     * @param string $name
+     * @return Response
+     * @throws InvalidArgumentException
+     */
     public function get(string $name): Response
     {
         try {
@@ -165,6 +174,10 @@ abstract class BaseDaktela implements IRequest
         }
     }
 
+    /**
+     * @return Response
+     * @throws InvalidArgumentException
+     */
     public function post(): Response
     {
         try {
@@ -185,6 +198,11 @@ abstract class BaseDaktela implements IRequest
         }
     }
 
+    /**
+     * @param string $name
+     * @return Response
+     * @throws InvalidArgumentException
+     */
     public function put(string $name): Response
     {
         try {

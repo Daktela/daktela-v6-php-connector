@@ -24,11 +24,31 @@ interface IRequest
 
     public function setFilter(array $filter, string $logic = BaseDaktela::FILTER_LOGIC_AND): IRequest;
 
-    /** @throwsInvalidArgumentExceptionn */
+    /**
+     * @return Response
+     * @throws InvalidArgumentException
+     */
     public function find(): Response;
 
-    /** @throwsInvalidArgumentExceptionn */
+    /**
+     * @param string $name
+     * @return Response
+     * @throws InvalidArgumentException
+     */
     public function get(string $name): Response;
+
+    /**
+     * @return Response
+     * @throws InvalidArgumentException
+     */
+    public function post(): Response;
+
+    /**
+     * @param string $name
+     * @return Response
+     * @throws InvalidArgumentException
+     */
+    public function put(string $name): Response;
 
     public function getPathMask(): string;
 

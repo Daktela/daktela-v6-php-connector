@@ -1,30 +1,53 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Daktela\DaktelaV6\Http;
 
-use Daktela\DaktelaV6\Client;
 use Daktela\DaktelaV6\Response\Response;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\InvalidArgumentException;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Utils;
 
+/**
+ * Class ApiCommunicator is a transport class of the Daktela V6 communication package and
+ * performs the main HTTP operations necessary to perform actions onto Daktela V6 API.
+ * @package Daktela\DaktelaV6\Http
+ */
 class ApiCommunicator
 {
-    const API_NAMESPACE = "/api/v6/";
-    const USER_AGENT = "daktela-v6-php-connector";
-    const VERIFY_SSL = false;
+    /** @var string Constant defining the base API URL */
+    private const API_NAMESPACE = "/api/v6/";
+    /** @var string Constant defining the User-Agent of the HTTP requests */
+    private const USER_AGENT = "daktela-v6-php-connector";
+    /** @var bool Constant defining where SSL certificate needs to be trusted */
+    private const VERIFY_SSL = true;
+    /** @var array static variable containing all singleton instances of the transport class */
     private static $singletons = [];
+    /** @var string URL of the Daktela instance */
     private $baseUrl;
+    /** @var string Access token used for communicating with Daktela REST API */
     private $accessToken;
 
-    public function __construct($baseUrl, $accessToken) {
+    /**
+     * ApiCommunicator constructor.
+     * @param string $baseUrl URL of the Daktela instance
+     * @param string $accessToken access token of user used for connecting to Daktela V6
+     */
+    public function __construct(string $baseUrl, string $accessToken)
+    {
         $this->baseUrl = $baseUrl;
         $this->accessToken = $accessToken;
     }
 
-    public static function getInstance($baseUrl, $accessToken)
+    /**
+     * Static method for using ApiCommunicator client connector as singleton.
+     * @param string $baseUrl URL of the Daktela instance
+     * @param string $accessToken access token of user used for connecting to Daktela V6
+     * @return ApiCommunicator instance of the transport class
+     */
+    public static function getInstance(string $baseUrl, string $accessToken): self
     {
         $key = md5($baseUrl . $accessToken);
         if (!isset(self::$singletons[$key])) {
@@ -33,16 +56,26 @@ class ApiCommunicator
         return self::$singletons[$key];
     }
 
+    /**
+     * Method for sending the requested data to Daktela API using HTTP client.
+     * @param string $method requested HTTP method for the request (GET/POST/PUT/DELETE)
+     * @param string $apiEndpoint requested API endpoint based on the Daktela V6 API documentation
+     * @param array $queryParams query parameters to be sent as part of the URL
+     * @param array|null $data collection of data to be sent as request payload (or null when none)
+     * @return Response the resulting response of the sent request
+     */
     public function sendRequest(string $method, string $apiEndpoint, array $queryParams = [], ?array $data = null): Response
     {
         $queryParams['accessToken'] = $this->accessToken;
 
         //Initialize the HTTP client
-        $client = new \GuzzleHttp\Client([
-            'base_uri' => self::normalizeUrl($this->baseUrl),
-            'timeout' => 2.0,
-            'verify' => self::VERIFY_SSL
-        ]);
+        $client = new \GuzzleHttp\Client(
+            [
+                'base_uri' => self::normalizeUrl($this->baseUrl),
+                'timeout' => 2.0,
+                'verify' => self::VERIFY_SSL
+            ]
+        );
         $headers = ["User-Agent" => self::USER_AGENT, "Content-Type" => "application/json"];
 
         //Prepare request URI
@@ -80,6 +113,11 @@ class ApiCommunicator
         return new Response($data, $total, $errors, $httpResponse->getStatusCode());
     }
 
+    /**
+     * Method for normalizing URL into one standard form the API transport class can use as part of the HTTP request.
+     * @param string|null $url URL to be normalized
+     * @return string|null normalized URL
+     */
     public static function normalizeUrl(?string $url): ?string
     {
         if (is_null($url)) {

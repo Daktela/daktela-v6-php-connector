@@ -51,10 +51,19 @@ $request = RequestFactory::buildReadRequest("CampaignsRecords")
 $response = $client->execute($request);
 ```
 
-In order to get one specific object for entity use the `getObjectByName()` method passing the object unique name:
+In order to get one specific object for entity use the `setObjectName()` method passing the object unique name along with `setRequestType(RequestType::TYPE_SINGLE)`:
 ```php
 $request = RequestFactory::buildReadRequest("CampaignsRecords")
     ->setRequestType(ReadRequest::TYPE_SINGLE)
+    ->setObjectName("records_5fa299a48ab72834012563");
+$response = $client->execute($request);
+```
+
+If relation data should be read `setObjectName()` and `setRelation()` methods passing the object unique name and relation name along with `setRequestType(RequestType::TYPE_MULTIPLE)`:
+```php
+$request = RequestFactory::buildReadRequest("CampaignsRecords")
+    ->setRequestType(ReadRequest::TYPE_MULTIPLE)
+    ->setRelation("activities")
     ->setObjectName("records_5fa299a48ab72834012563");
 $response = $client->execute($request);
 ```
@@ -91,7 +100,9 @@ $response = $client->execute($request);
 ### Creating entities
 ```php
 $request = RequestFactory::buildCreateRequest("CampaignsRecords")
-    ->addAttribute("number", "00420226211245");
+    ->addStringAttribute("number", "00420226211245")
+    ->addIntAttribute("number", 0)
+    ->addAttributes(["queue" => 3000]);
 $response = $client->execute($request);
 ```
 
@@ -99,7 +110,9 @@ $response = $client->execute($request);
 ```php
 $request = RequestFactory::buildUpdateRequest("CampaignsRecords")
     ->setObjectName("records_5fa299a48ab72834012563")
-    ->addAttribute("number", "00420226211245");
+    ->addStringAttribute("number", "00420226211245")
+    ->addIntAttribute("number", 0)
+    ->addAttributes(["queue" => 3000]);
 $response = $client->execute($request);
 ```
 

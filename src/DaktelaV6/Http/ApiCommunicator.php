@@ -64,8 +64,12 @@ class ApiCommunicator
      * @param array|null $data collection of data to be sent as request payload (or null when none)
      * @return Response the resulting response of the sent request
      */
-    public function sendRequest(string $method, string $apiEndpoint, array $queryParams = [], ?array $data = null): Response
-    {
+    public function sendRequest(
+        string $method,
+        string $apiEndpoint,
+        array $queryParams = [],
+        ?array $data = null
+    ): Response {
         $queryParams['accessToken'] = $this->accessToken;
 
         //Initialize the HTTP client
@@ -93,7 +97,12 @@ class ApiCommunicator
         try {
             $httpResponse = $client->send($request);
         } catch (GuzzleException $ex) {
-            return new Response(null, -1, [$ex->getMessage()], !is_null($httpResponse) ? $httpResponse->getStatusCode() : 0);
+            return new Response(
+                null,
+                -1,
+                [$ex->getMessage()],
+                !is_null($httpResponse) ? $httpResponse->getStatusCode() : 0
+            );
         }
 
         //Handle JSON parsing and result return

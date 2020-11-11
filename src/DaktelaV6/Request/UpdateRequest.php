@@ -43,5 +43,4 @@ class UpdateRequest extends ARequestWithAttributes
     {
         return $this->objectName;
     }
-
 }

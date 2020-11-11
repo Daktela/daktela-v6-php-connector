@@ -118,7 +118,12 @@ class Client
         if (is_null($request->getObjectName()) || empty($request->getObjectName())) {
             return new Response(null, -1, ['No object name specified'], 0);
         }
-        return $this->apiCommunicator->sendRequest("PUT", $request->getModel() . "/" . $request->getObjectName(), [], $request->getAttributes());
+        return $this->apiCommunicator->sendRequest(
+            "PUT",
+            $request->getModel() . "/" . $request->getObjectName(),
+            [],
+            $request->getAttributes()
+        );
     }
 
     /**
@@ -141,7 +146,12 @@ class Client
      */
     private function executeReadMultiple(ReadRequest $request): Response
     {
-        $queryParams = ['skip' => $request->getSkip(), 'take' => $request->getTake(), 'filter' => $request->getFilters(), 'sort' => $request->getSorts()];
+        $queryParams = [
+            'skip' => $request->getSkip(),
+            'take' => $request->getTake(),
+            'filter' => $request->getFilters(),
+            'sort' => $request->getSorts()
+        ];
 
         //Define the API endpoint (if relational data are read, read them)
         $endpoint = $request->getModel();
@@ -163,7 +173,12 @@ class Client
     {
         $response = new Response([], 0, [], 0);
         for ($i = 0; $i < self::READ_LIMIT; $i++) {
-            $queryParams = ['skip' => ($i * $request->getTake()), 'take' => $request->getTake(), 'filter' => $request->getFilters(), 'sort' => $request->getSorts()];
+            $queryParams = [
+                'skip' => ($i * $request->getTake()),
+                'take' => $request->getTake(),
+                'filter' => $request->getFilters(),
+                'sort' => $request->getSorts()
+            ];
 
             //Define the API endpoint (if relational data are read, read them)
             $endpoint = $request->getModel();
@@ -183,7 +198,12 @@ class Client
             } elseif (!$request->isSkipErrorRequests()) {
                 return $currentResponse;
             }
-            $response = new Response($data, $currentResponse->getTotal(), $currentResponse->getErrors(), $currentResponse->getHttpStatus());
+            $response = new Response(
+                $data,
+                $currentResponse->getTotal(),
+                $currentResponse->getErrors(),
+                $currentResponse->getHttpStatus()
+            );
 
             //If returned less than take, it is the last page
             if (count($currentResponse->getData()) < $request->getTake()) {

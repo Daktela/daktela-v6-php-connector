@@ -28,5 +28,4 @@ class DeleteRequest extends ARequest
     {
         return $this->objectName;
     }
-
 }

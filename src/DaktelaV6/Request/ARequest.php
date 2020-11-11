@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Daktela\DaktelaV6\Request;
@@ -14,12 +15,11 @@ abstract class ARequest
 {
     /** @var string name of the API model of the request */
     private $model;
-    /** @var bool variable used for flagging the request as already executed */
+/** @var bool variable used for flagging the request as already executed */
     private $executed = false;
-    /** @var Response|null cached response of the request */
+/** @var Response|null cached response of the request */
     private $response = null;
-
-    /**
+/**
      * ARequest constructor.
      * @param $model name of the API model of the request
      */
@@ -72,5 +72,4 @@ abstract class ARequest
     {
         return $this->model;
     }
-
 }

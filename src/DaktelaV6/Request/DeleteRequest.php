@@ -17,6 +17,7 @@ class DeleteRequest extends ARequest
     public function setObjectName(string $objectName): self
     {
         $this->objectName = $objectName;
+
         return $this;
     }
 

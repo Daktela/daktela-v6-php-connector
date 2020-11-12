@@ -57,7 +57,7 @@ class ReadRequestTest extends TestCase
 
         $filters = [
             ["field" => "edited", "operator" => "lte", "value" => "2020-11-30 23:59:59"],
-            ["action", "eq", "0"]
+            ["action", "eq", "0"],
         ];
 
         $request->addFilterFromArray($filters);
@@ -88,12 +88,13 @@ class ReadRequestTest extends TestCase
 
         $filters = [
             ["field" => "edited", "operator" => "lte", "value" => "2020-11-30 23:59:59"],
-            ["action", "eq", "0"]
+            ["action", "eq", "0"],
         ];
 
-        $request->addFilterFromArray([
+        $request->addFilterFromArray(
+            [
                 'logic' => 'or',
-                'filters' => $filters
+                'filters' => $filters,
             ]
         );
         $filters = $request->getFilters();
@@ -125,7 +126,7 @@ class ReadRequestTest extends TestCase
         $request->addFilter("action", "eq", "0");
         $filters = [
             ["field" => "created", "operator" => "lte", "value" => "2020-11-30 23:59:59"],
-            ["user", "isnull", ""]
+            ["user", "isnull", ""],
         ];
 
         $request->addFilterFromArray($filters);

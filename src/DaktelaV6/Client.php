@@ -59,10 +59,11 @@ class Client
      */
     public static function getInstance(string $instance, string $accessToken): self
     {
-        $key = md5($instance . $accessToken);
+        $key = md5($instance.$accessToken);
         if (!isset(self::$singletons[$key])) {
             self::$singletons[$key] = new Client($instance, $accessToken);
         }
+
         return self::$singletons[$key];
     }
 
@@ -95,6 +96,7 @@ class Client
                     return $this->executeReadAll($request);
             }
         }
+
         return new Response(null, 0, ['Unknown request type'], 0);
     }
 
@@ -118,9 +120,10 @@ class Client
         if (is_null($request->getObjectName()) || empty($request->getObjectName())) {
             return new Response(null, -1, ['No object name specified'], 0);
         }
+
         return $this->apiCommunicator->sendRequest(
             "PUT",
-            $request->getModel() . "/" . $request->getObjectName(),
+            $request->getModel()."/".$request->getObjectName(),
             [],
             $request->getAttributes()
         );
@@ -136,7 +139,8 @@ class Client
         if (is_null($request->getObjectName()) || empty($request->getObjectName())) {
             return new Response(null, -1, ['No object name specified'], 0);
         }
-        return $this->apiCommunicator->sendRequest("DELETE", $request->getModel() . "/" . $request->getObjectName());
+
+        return $this->apiCommunicator->sendRequest("DELETE", $request->getModel()."/".$request->getObjectName());
     }
 
     /**
@@ -150,13 +154,13 @@ class Client
             'skip' => $request->getSkip(),
             'take' => $request->getTake(),
             'filter' => $request->getFilters(),
-            'sort' => $request->getSorts()
+            'sort' => $request->getSorts(),
         ];
 
         //Define the API endpoint (if relational data are read, read them)
         $endpoint = $request->getModel();
         if (!is_null($request->getRelation()) && !is_null($request->getObjectName())) {
-            $endpoint .= "/" . $request->getObjectName() . "/" . $request->getRelation();
+            $endpoint .= "/".$request->getObjectName()."/".$request->getRelation();
         }
 
         return $this->apiCommunicator->sendRequest("GET", $endpoint, $queryParams);
@@ -177,13 +181,13 @@ class Client
                 'skip' => ($i * $request->getTake()),
                 'take' => $request->getTake(),
                 'filter' => $request->getFilters(),
-                'sort' => $request->getSorts()
+                'sort' => $request->getSorts(),
             ];
 
             //Define the API endpoint (if relational data are read, read them)
             $endpoint = $request->getModel();
             if (!is_null($request->getRelation()) && !is_null($request->getObjectName())) {
-                $endpoint .= "/" . $request->getObjectName() . "/" . $request->getRelation();
+                $endpoint .= "/".$request->getObjectName()."/".$request->getRelation();
             }
 
             $currentResponse = $this->apiCommunicator->sendRequest("GET", $endpoint, $queryParams);
@@ -210,6 +214,7 @@ class Client
                 break;
             }
         }
+
         return $response;
     }
 
@@ -223,6 +228,7 @@ class Client
         if (is_null($request->getObjectName()) || empty($request->getObjectName())) {
             return new Response(null, -1, ['No object name specified'], 0);
         }
-        return $this->apiCommunicator->sendRequest("GET", $request->getModel() . "/" . $request->getObjectName());
+
+        return $this->apiCommunicator->sendRequest("GET", $request->getModel()."/".$request->getObjectName());
     }
 }

@@ -30,6 +30,7 @@ class ARequestWithAttributes extends ARequest
     public function addStringAttribute(string $key, string $value): self
     {
         $this->attributes[$key] = $value;
+
         return $this;
     }
 
@@ -42,6 +43,7 @@ class ARequestWithAttributes extends ARequest
     public function addIntAttribute(string $key, int $value): self
     {
         $this->attributes[$key] = $value;
+
         return $this;
     }
 
@@ -54,6 +56,7 @@ class ARequestWithAttributes extends ARequest
     public function addFloatAttribute(string $key, float $value): self
     {
         $this->attributes[$key] = $value;
+
         return $this;
     }
 
@@ -66,6 +69,7 @@ class ARequestWithAttributes extends ARequest
     public function addDoubleAttribute(string $key, float $value): self
     {
         $this->attributes[$key] = $value;
+
         return $this;
     }
 
@@ -78,6 +82,7 @@ class ARequestWithAttributes extends ARequest
     public function addBoolAttribute(string $key, bool $value): self
     {
         $this->attributes[$key] = $value;
+
         return $this;
     }
 
@@ -90,6 +95,7 @@ class ARequestWithAttributes extends ARequest
     public function addArrayAttribute(string $key, array $value): self
     {
         $this->attributes[$key] = $value;
+
         return $this;
     }
 
@@ -115,6 +121,7 @@ class ARequestWithAttributes extends ARequest
                 $this->addDoubleAttribute($key, $value);
             }
         }
+
         return $this;
     }
 

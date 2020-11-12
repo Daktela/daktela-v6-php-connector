@@ -85,7 +85,7 @@ class ReadRequest extends ARequest
         if (!isset($filters['filters'])) {
             $filters = [
                 'logic' => $filters['logic'] ?? 'and',
-                'filters' => $filters
+                'filters' => $filters,
             ];
         }
 
@@ -112,6 +112,7 @@ class ReadRequest extends ARequest
     public function addSort(string $field, string $dir): self
     {
         $this->sort[] = ['field' => $field, 'dir' => $dir];
+
         return $this;
     }
 
@@ -141,6 +142,7 @@ class ReadRequest extends ARequest
     public function setTake(int $take): self
     {
         $this->take = $take;
+
         return $this;
     }
 
@@ -161,6 +163,7 @@ class ReadRequest extends ARequest
     public function setSkip(int $skip): self
     {
         $this->skip = $skip;
+
         return $this;
     }
 
@@ -181,6 +184,7 @@ class ReadRequest extends ARequest
     public function setSkipErrorRequests(bool $skipErrorRequests): self
     {
         $this->skipErrorRequests = $skipErrorRequests;
+
         return $this;
     }
 
@@ -231,6 +235,7 @@ class ReadRequest extends ARequest
     public function setObjectName(string $objectName): self
     {
         $this->objectName = $objectName;
+
         return $this;
     }
 
@@ -251,6 +256,7 @@ class ReadRequest extends ARequest
     public function setRelation(string $relation): self
     {
         $this->relation = $relation;
+
         return $this;
     }
 
@@ -271,6 +277,7 @@ class ReadRequest extends ARequest
     public function setRequestType(int $requestType): self
     {
         $this->requestType = $requestType;
+
         return $this;
     }
 

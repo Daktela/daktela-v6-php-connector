@@ -49,10 +49,11 @@ class ApiCommunicator
      */
     public static function getInstance(string $baseUrl, string $accessToken): self
     {
-        $key = md5($baseUrl . $accessToken);
+        $key = md5($baseUrl.$accessToken);
         if (!isset(self::$singletons[$key])) {
             self::$singletons[$key] = new ApiCommunicator($baseUrl, $accessToken);
         }
+
         return self::$singletons[$key];
     }
 
@@ -77,13 +78,13 @@ class ApiCommunicator
             [
                 'base_uri' => self::normalizeUrl($this->baseUrl),
                 'timeout' => 2.0,
-                'verify' => self::VERIFY_SSL
+                'verify' => self::VERIFY_SSL,
             ]
         );
         $headers = ["User-Agent" => self::USER_AGENT, "Content-Type" => "application/json"];
 
         //Prepare request URI
-        $requestUri = self::API_NAMESPACE . lcfirst($apiEndpoint) . ".json?" . http_build_query($queryParams);
+        $requestUri = self::API_NAMESPACE.lcfirst($apiEndpoint).".json?".http_build_query($queryParams);
 
         //Build the request
         $body = null;
@@ -134,11 +135,12 @@ class ApiCommunicator
         }
 
         if ((mb_substr($url, 0, 7) != "http://") && (mb_substr($url, 0, 8) != "https://")) {
-            $url = "https://" . $url;
+            $url = "https://".$url;
         }
         if (mb_substr($url, -1) == "/") {
             $url = mb_substr($url, 0, -1);
         }
+
         return $url;
     }
 }

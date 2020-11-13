@@ -35,6 +35,42 @@ class RequestFactory
     }
 
     /**
+     * Builds a new empty read request instance for reading one specific object.
+     * @param string $model model of the REST API to be used
+     * @param string $entityName unique name of the object to be loaded
+     * @return ReadRequest instance of the read request
+     */
+    public static function buildReadSingleRequest(string $model, string $entityName): ReadRequest
+    {
+        return self::buildReadRequest($model)->setRequestType(ReadRequest::TYPE_SINGLE)->setObjectName($entityName);
+    }
+
+    /**
+     * Builds a new empty read request instance for reading multiple objects.
+     * @param string $model model of the REST API to be used
+     * @return ReadRequest instance of the read request
+     */
+    public static function buildReadMultipleRequest(string $model): ReadRequest
+    {
+        return self::buildReadRequest($model)->setRequestType(ReadRequest::TYPE_MULTIPLE);
+    }
+
+    /**
+     * Builds a new empty read request instance for reading relation data of one specific object.
+     * @param string $model model of the REST API to be used
+     * @param string $entityName unique name of the object to be loaded
+     * @param string $relation name of the relation
+     * @return ReadRequest instance of the read request
+     */
+    public static function buildReadRelationRequest(string $model, string $entityName, string $relation): ReadRequest
+    {
+        return self::buildReadRequest($model)
+            ->setRequestType(ReadRequest::TYPE_MULTIPLE)
+            ->setObjectName($entityName)
+            ->setRelation($relation);
+    }
+
+    /**
      * Builds a new empty create request instance.
      * @param string $model model of the REST API to be used
      * @return CreateRequest instance of the create request

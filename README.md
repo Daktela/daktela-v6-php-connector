@@ -33,7 +33,7 @@ use Daktela\DaktelaV6\RequestFactory;
 $instance = "https://mydaktela.daktela.com/";
 $accessToken = "0b7cb37b6c2b96a4b68128b212c799056564e0f2";
 
-$client = Client::getInstance($instance, $accessToken)
+$client = Client::getInstance($instance, $accessToken);
 $request = RequestFactory::buildReadRequest("Users")
     ->addFilter("username", "eq", "admin");
 $response = $client->execute($request);

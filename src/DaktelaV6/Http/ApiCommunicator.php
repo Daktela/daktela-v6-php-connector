@@ -118,7 +118,7 @@ class ApiCommunicator
 
         $data = $responseBody->result->data ?? ($responseBody->result ?? null);
         $total = $responseBody->result->total ?? (isset($responseBody->result) ? 1 : -1);
-        $errors = $responseBody->errors ?? [];
+        $errors = $responseBody->error ?? [];
 
         return new Response($data, $total, $errors, $httpResponse->getStatusCode());
     }

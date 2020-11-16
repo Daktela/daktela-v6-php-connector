@@ -243,7 +243,7 @@ class ReadRequest extends ARequest
      * Method for obtaining the object name to be read.
      * @return string unique name of the object that is supposed to be read
      */
-    public function getObjectName(): string
+    public function getObjectName(): ?string
     {
         return $this->objectName;
     }
@@ -264,7 +264,7 @@ class ReadRequest extends ARequest
      * Method for obtaining the relation to be read on specific object.
      * @return string name of the relation to be read
      */
-    public function getRelation(): string
+    public function getRelation(): ?string
     {
         return $this->relation;
     }

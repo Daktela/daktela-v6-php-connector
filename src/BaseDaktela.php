@@ -123,7 +123,7 @@ abstract class BaseDaktela implements IRequest
             throw new InvalidArgumentException(sprintf('Filter logic %s is not supported, Availables: %s', $logic, implode(', ', $this->supportedFilterLogics)));
         }
 
-        $this->queryData['filters'][] = $filter;
+        $this->queryData['filter'][] = $filter;
         return $this;
     }
 

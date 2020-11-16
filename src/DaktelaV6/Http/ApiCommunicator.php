@@ -29,6 +29,8 @@ class ApiCommunicator
     private $baseUrl;
     /** @var string Access token used for communicating with Daktela REST API */
     private $accessToken;
+    /** @var float Timeout for HTTP request sent to API */
+    private $requestTimeout = 2.0;
 
     /**
      * ApiCommunicator constructor.
@@ -77,7 +79,7 @@ class ApiCommunicator
         $client = new \GuzzleHttp\Client(
             [
                 'base_uri' => self::normalizeUrl($this->baseUrl),
-                'timeout' => 2.0,
+                'timeout' => $this->requestTimeout,
                 'verify' => self::VERIFY_SSL,
             ]
         );
@@ -121,6 +123,15 @@ class ApiCommunicator
         $errors = $responseBody->error ?? [];
 
         return new Response($data, $total, $errors, $httpResponse->getStatusCode());
+    }
+
+    /**
+     * The HTTP request timeout that should be used when communicating with the associated API.
+     * @param float $requestTimeout Timeout of the HTTP request
+     */
+    public function setRequestTimeout(float $requestTimeout): void
+    {
+        $this->requestTimeout = $requestTimeout;
     }
 
     /**

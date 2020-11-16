@@ -231,4 +231,13 @@ class Client
 
         return $this->apiCommunicator->sendRequest("GET", $request->getModel()."/".$request->getObjectName());
     }
+
+    /**
+     * Returns the API communicator assigned to the current Daktela V6 client instance.
+     * @return ApiCommunicator|null API communicator assigned to the current Daktela V6 client instance
+     */
+    public function getApiCommunicator(): ?ApiCommunicator
+    {
+        return $this->apiCommunicator;
+    }
 }

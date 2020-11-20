@@ -107,7 +107,12 @@ class Client
      */
     private function executeCreate(CreateRequest $request): Response
     {
-        return $this->apiCommunicator->sendRequest("POST", $request->getModel(), [], $request->getAttributes());
+        return $this->apiCommunicator->sendRequest(
+            "POST",
+            $request->getModel(),
+            $request->getAdditionalQueryParameters(),
+            $request->getAttributes()
+        );
     }
 
     /**
@@ -124,7 +129,7 @@ class Client
         return $this->apiCommunicator->sendRequest(
             "PUT",
             $request->getModel()."/".$request->getObjectName(),
-            [],
+            $request->getAdditionalQueryParameters(),
             $request->getAttributes()
         );
     }
@@ -140,7 +145,11 @@ class Client
             return new Response(null, -1, ['No object name specified'], 0);
         }
 
-        return $this->apiCommunicator->sendRequest("DELETE", $request->getModel()."/".$request->getObjectName());
+        return $this->apiCommunicator->sendRequest(
+            "DELETE",
+            $request->getModel()."/".$request->getObjectName(),
+            $request->getAdditionalQueryParameters()
+        );
     }
 
     /**
@@ -150,12 +159,15 @@ class Client
      */
     private function executeReadMultiple(ReadRequest $request): Response
     {
-        $queryParams = [
-            'skip' => $request->getSkip(),
-            'take' => $request->getTake(),
-            'filter' => $request->getFilters(),
-            'sort' => $request->getSorts(),
-        ];
+        $queryParams = array_merge(
+            $request->getAdditionalQueryParameters(),
+            [
+                'skip' => $request->getSkip(),
+                'take' => $request->getTake(),
+                'filter' => $request->getFilters(),
+                'sort' => $request->getSorts(),
+            ]
+        );
 
         //Define the API endpoint (if relational data are read, read them)
         $endpoint = $request->getModel();
@@ -177,12 +189,15 @@ class Client
     {
         $response = new Response([], 0, [], 0);
         for ($i = 0; $i < self::READ_LIMIT; $i++) {
-            $queryParams = [
-                'skip' => ($i * $request->getTake()),
-                'take' => $request->getTake(),
-                'filter' => $request->getFilters(),
-                'sort' => $request->getSorts(),
-            ];
+            $queryParams = array_merge(
+                $request->getAdditionalQueryParameters(),
+                [
+                    'skip' => ($i * $request->getTake()),
+                    'take' => $request->getTake(),
+                    'filter' => $request->getFilters(),
+                    'sort' => $request->getSorts(),
+                ]
+            );
 
             //Define the API endpoint (if relational data are read, read them)
             $endpoint = $request->getModel();
@@ -229,7 +244,11 @@ class Client
             return new Response(null, -1, ['No object name specified'], 0);
         }
 
-        return $this->apiCommunicator->sendRequest("GET", $request->getModel()."/".$request->getObjectName());
+        return $this->apiCommunicator->sendRequest(
+            "GET",
+            $request->getModel()."/".$request->getObjectName(),
+            $request->getAdditionalQueryParameters()
+        );
     }
 
     /**

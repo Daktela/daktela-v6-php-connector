@@ -4,7 +4,7 @@
 namespace Daktela\DaktelaV6\Utils;
 
 
-class Formatter
+class FormatHelper
 {
 
     /**

@@ -11,13 +11,20 @@
     {
       "name": "Jiri Havlicek",
       "email": "jiri.havlicek@daktela.com"
-    },
-    {
-      "name": "Petr Kalisek",
-      "email": "petr.kalisek@daktela.com"
     }
   ],
   "require": {
-    "php": ">=7.0"
+    "php": ">=7.1",
+    "guzzlehttp/guzzle": "7.*"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "9.4.3",
+    "phpstan/phpstan": "0.12.54",
+    "squizlabs/php_codesniffer": "3.5.8"
+  },
+  "autoload": {
+    "psr-4": {
+      "Daktela\\": "src/"
+    }
   }
 }

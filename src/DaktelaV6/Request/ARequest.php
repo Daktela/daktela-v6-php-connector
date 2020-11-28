@@ -82,8 +82,10 @@ abstract class ARequest
      * @param string $value value of the query string parameter
      * @return $this current instance of the request to be used as builder pattern
      */
-    public function addAdditionalQueryParameter(string $key, string $value) : self {
+    public function addAdditionalQueryParameter(string $key, string $value): self
+    {
         $this->additionalQueryParameters[$key] = $value;
+
         return $this;
     }
 
@@ -91,7 +93,8 @@ abstract class ARequest
      * Returns the current additional query string parameters configuration.
      * @return array additional query string parameters configuration
      */
-    public function getAdditionalQueryParameters(): array {
+    public function getAdditionalQueryParameters(): array
+    {
         return $this->additionalQueryParameters;
     }
 }

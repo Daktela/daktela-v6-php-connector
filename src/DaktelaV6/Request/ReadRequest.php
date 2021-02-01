@@ -37,6 +37,8 @@ class ReadRequest extends ARequest
     public const TYPE_ALL = 2;
     /** @var array Variable containing currently used filters */
     private $filters = [];
+    /** @var array Variable containing currently used required fields */
+    private $fields = [];
     /** @var array Variable containing currently used sort conditions */
     private $sort = [];
     /** @var int Variable containing current take limit of the request */
@@ -132,6 +134,27 @@ class ReadRequest extends ARequest
     public function getFilters(): array
     {
         return $this->filters;
+    }
+
+    /**
+     * Sets the required fields array.
+     * @param array $fields array of fields required by the request
+     * @return $this current instance of the request to be used as builder pattern
+     */
+    public function setFields(array $fields): self
+    {
+        $this->fields = $fields;
+
+        return $this;
+    }
+
+    /**
+     * Returns current required fields array.
+     * @return array current required fields array
+     */
+    public function getFields(): array
+    {
+        return $this->fields;
     }
 
     /**

@@ -59,7 +59,7 @@ class Client
      */
     public static function getInstance(string $instance, string $accessToken): self
     {
-        $key = md5($instance.$accessToken);
+        $key = md5($instance . $accessToken);
         if (!isset(self::$singletons[$key])) {
             self::$singletons[$key] = new Client($instance, $accessToken);
         }
@@ -128,7 +128,7 @@ class Client
 
         return $this->apiCommunicator->sendRequest(
             "PUT",
-            $request->getModel()."/".$request->getObjectName(),
+            $request->getModel() . "/" . $request->getObjectName(),
             $request->getAdditionalQueryParameters(),
             $request->getAttributes()
         );
@@ -147,7 +147,7 @@ class Client
 
         return $this->apiCommunicator->sendRequest(
             "DELETE",
-            $request->getModel()."/".$request->getObjectName(),
+            $request->getModel() . "/" . $request->getObjectName(),
             $request->getAdditionalQueryParameters()
         );
     }
@@ -168,11 +168,14 @@ class Client
                 'sort' => $request->getSorts(),
             ]
         );
+        if (count($request->getFields()) > 0) {
+            $queryParams = array_merge($queryParams, $request->getFields());
+        }
 
         //Define the API endpoint (if relational data are read, read them)
         $endpoint = $request->getModel();
         if (!is_null($request->getRelation()) && !is_null($request->getObjectName())) {
-            $endpoint .= "/".$request->getObjectName()."/".$request->getRelation();
+            $endpoint .= "/" . $request->getObjectName() . "/" . $request->getRelation();
         }
 
         return $this->apiCommunicator->sendRequest("GET", $endpoint, $queryParams);
@@ -198,11 +201,14 @@ class Client
                     'sort' => $request->getSorts(),
                 ]
             );
+            if (count($request->getFields()) > 0) {
+                $queryParams = array_merge($queryParams, $request->getFields());
+            }
 
             //Define the API endpoint (if relational data are read, read them)
             $endpoint = $request->getModel();
             if (!is_null($request->getRelation()) && !is_null($request->getObjectName())) {
-                $endpoint .= "/".$request->getObjectName()."/".$request->getRelation();
+                $endpoint .= "/" . $request->getObjectName() . "/" . $request->getRelation();
             }
 
             $currentResponse = $this->apiCommunicator->sendRequest("GET", $endpoint, $queryParams);
@@ -244,10 +250,15 @@ class Client
             return new Response(null, -1, ['No object name specified'], 0);
         }
 
+        $queryParams = $request->getAdditionalQueryParameters();
+        if (count($request->getFields()) > 0) {
+            $queryParams = array_merge($queryParams, $request->getFields());
+        }
+
         return $this->apiCommunicator->sendRequest(
             "GET",
-            $request->getModel()."/".$request->getObjectName(),
-            $request->getAdditionalQueryParameters()
+            $request->getModel() . "/" . $request->getObjectName(),
+            $queryParams
         );
     }
 

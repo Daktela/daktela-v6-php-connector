@@ -28,25 +28,25 @@ class Response
     }
 
     /**
-     * @return mixed
+     * @return int response total rows
      */
-    public function getTotal()
+    public function getTotal(): int
     {
         return $this->total;
     }
 
     /**
-     * @return mixed
+     * @return array array of errors if any
      */
-    public function getErrors()
+    public function getErrors(): array
     {
         return $this->errors;
     }
 
     /**
-     * @return mixed
+     * @return int HTTP status code
      */
-    public function getHttpStatus()
+    public function getHttpStatus(): int
     {
         return $this->httpStatus;
     }

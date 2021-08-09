@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Daktela\DaktelaV6;
 
+use Daktela\DaktelaV6\Exception\NotFoundException;
+use Daktela\DaktelaV6\Exception\UnknownRequestTypeException;
 use Daktela\DaktelaV6\Http\ApiCommunicator;
 use Daktela\DaktelaV6\Request\ARequest;
 use Daktela\DaktelaV6\Request\CreateRequest;
@@ -32,12 +34,8 @@ class Client
     private static $singletons = [];
     /** Maximum limit for reading all entities method */
     public const READ_LIMIT = 999;
-    /** @var string URL of the Daktela instance the client is connecting to */
-    private $instance = null;
-    /** @var string access token of the connecting user */
-    private $accessToken = null;
     /** @var ApiCommunicator API communicator transport class corresponding the instance of client */
-    private $apiCommunicator = null;
+    private $apiCommunicator;
 
     /**
      * Client constructor.
@@ -46,8 +44,6 @@ class Client
      */
     public function __construct(string $instance, string $accessToken)
     {
-        $this->instance = $instance;
-        $this->accessToken = $accessToken;
         $this->apiCommunicator = ApiCommunicator::getInstance($instance, $accessToken);
     }
 
@@ -73,6 +69,8 @@ class Client
      * corresponding action using appropriate REST operation.
      * @param ARequest $request instance of the request to be performed on the Daktela API
      * @return Response immutable object containing the response information
+     * @throws UnknownRequestTypeException a request type has been specified incorrectly
+     * @throws NotFoundException data could not be found using provided conditions
      */
     public function execute(ARequest $request): Response
     {
@@ -97,11 +95,11 @@ class Client
             }
         }
 
-        return new Response(null, 0, ['Unknown request type'], 0);
+        throw new UnknownRequestTypeException();
     }
 
     /**
-     * Performs the Create action (POST).
+     * Performs the Creation action (POST).
      * @param CreateRequest $request instance of the request to be performed on the Daktela API
      * @return Response immutable object containing the response information
      */
@@ -119,11 +117,12 @@ class Client
      * Performs the Update action (PUT).
      * @param UpdateRequest $request instance of the request to be performed on the Daktela API
      * @return Response immutable object containing the response information
+     * @throws NotFoundException data could not be found using provided conditions
      */
-    private function executeUpdate(UpdateRequest $request)
+    private function executeUpdate(UpdateRequest $request): Response
     {
-        if (is_null($request->getObjectName()) || empty($request->getObjectName())) {
-            return new Response(null, -1, ['No object name specified'], 0);
+        if (empty($request->getObjectName())) {
+            throw new NotFoundException('No object name specified');
         }
 
         return $this->apiCommunicator->sendRequest(
@@ -138,11 +137,12 @@ class Client
      * Performs the Delete action (DELETE)
      * @param DeleteRequest $request instance of the request to be performed on the Daktela API
      * @return Response immutable object containing the response information
+     * @throws NotFoundException data could not be found using provided conditions
      */
     private function executeDelete(DeleteRequest $request): Response
     {
-        if (is_null($request->getObjectName()) || empty($request->getObjectName())) {
-            return new Response(null, -1, ['No object name specified'], 0);
+        if (empty($request->getObjectName())) {
+            throw new NotFoundException('No object name specified');
         }
 
         return $this->apiCommunicator->sendRequest(
@@ -243,11 +243,12 @@ class Client
      * Performs the Read action (GET) when the client is requesting single object.
      * @param ReadRequest $request instance of the request to be performed on the Daktela API
      * @return Response immutable object containing the response information
+     * @throws NotFoundException data could not be found using provided conditions
      */
     private function executeReadSingle(ReadRequest $request): Response
     {
-        if (is_null($request->getObjectName()) || empty($request->getObjectName())) {
-            return new Response(null, -1, ['No object name specified'], 0);
+        if (empty($request->getObjectName())) {
+            throw new NotFoundException('No object name specified');
         }
 
         $queryParams = $request->getAdditionalQueryParameters();

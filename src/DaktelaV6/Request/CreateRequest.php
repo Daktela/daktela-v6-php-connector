@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Daktela\DaktelaV6\Request;
 
 /**
- * Class CreateRequest represents the Create (POST) request used for creating entities using
+ * Class CreateRequest represents the Creation (POST) request used for creating entities using
  * Daktela V6 REST API.
  *
  * The class can be used as follows:

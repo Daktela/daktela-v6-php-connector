@@ -15,6 +15,7 @@ class ApiRequestTest extends TestCase
     private $hash;
     private $url;
     private $accessToken;
+    private $queue;
 
     public function setUp(): void
     {
@@ -23,8 +24,9 @@ class ApiRequestTest extends TestCase
         $this->hash = md5(uniqid());
         $this->url = getenv("INSTANCE");
         $this->accessToken = getenv("ACCESS_TOKEN");
+        $this->queue = getenv("QUEUE");
 
-        if (is_null($this->url) || empty($this->url) || is_null($this->accessToken) || empty($this->accessToken)) {
+        if (empty($this->url) || empty($this->accessToken) || empty($this->queue)) {
             throw new SkippedTestSuiteError('Missing URL or Access token in phpunit.xml');
         }
     }
@@ -34,14 +36,14 @@ class ApiRequestTest extends TestCase
         $client = new Client($this->url, $this->accessToken);
         $request = new CreateRequest("CampaignsRecords");
 
-        $request->addStringAttribute("name", "test_create_".$this->hash);
+        $request->addStringAttribute("name", "test_create_" . $this->hash);
         $request->addStringAttribute("number", "+420111222333");
-        $request->addAttributes(["action" => 5, "queue" => 311831447]);
+        $request->addAttributes(["action" => 5, "queue" => $this->queue]);
         $response = $client->execute($request);
         self::assertNotNull($response->getData());
         self::assertEquals(201, $response->getHttpStatus());
         self::assertObjectHasAttribute('name', $response->getData());
-        self::assertEquals("test_create_".$this->hash, $response->getData()->name);
+        self::assertEquals("test_create_" . $this->hash, $response->getData()->name);
         self::assertEmpty($response->getErrors());
         self::assertEquals(1, $response->getTotal());
         self::assertEquals("+420111222333", $response->getData()->number);
@@ -52,15 +54,15 @@ class ApiRequestTest extends TestCase
         $client = new Client($this->url, $this->accessToken);
         $request = new CreateRequest("CampaignsRecords");
 
-        $request->addStringAttribute("name", "test_read1_".$this->hash);
+        $request->addStringAttribute("name", "test_read1_" . $this->hash);
         $request->addStringAttribute("number", "+420111222333");
-        $request->addAttributes(["action" => 5, "queue" => 311831447]);
+        $request->addAttributes(["action" => 5, "queue" => $this->queue]);
         $response = $client->execute($request);
         self::assertEquals(201, $response->getHttpStatus());
 
         $requestRead = new ReadRequest("CampaignsRecords");
         $requestRead->addFilter("number", "eq", "+420111222333");
-        $requestRead->addFilter("name", "eq", "test_read1_".$this->hash);
+        $requestRead->addFilter("name", "eq", "test_read1_" . $this->hash);
         $responseRead = $client->execute($requestRead);
         self::assertNotNull($responseRead->getData());
         self::assertNotEmpty($responseRead->getData());
@@ -69,7 +71,7 @@ class ApiRequestTest extends TestCase
         self::assertGreaterThan(0, $responseRead->getData());
         self::assertArrayHasKey(0, $responseRead->getData());
         self::assertObjectHasAttribute("name", $responseRead->getData()[0]);
-        self::assertEquals("test_read1_".$this->hash, $responseRead->getData()[0]->name);
+        self::assertEquals("test_read1_" . $this->hash, $responseRead->getData()[0]->name);
     }
 
     public function testReadAllRequest()
@@ -77,16 +79,16 @@ class ApiRequestTest extends TestCase
         $client = new Client($this->url, $this->accessToken);
         $request = new CreateRequest("CampaignsRecords");
 
-        $request->addStringAttribute("name", "test_read3_".$this->hash);
+        $request->addStringAttribute("name", "test_read3_" . $this->hash);
         $request->addStringAttribute("number", "+420111222333");
-        $request->addAttributes(["action" => 5, "queue" => 311831447]);
+        $request->addAttributes(["action" => 5, "queue" => $this->queue]);
         $response = $client->execute($request);
         self::assertEquals(201, $response->getHttpStatus());
 
         $requestRead = new ReadRequest("CampaignsRecords");
         $requestRead->setRequestType(ReadRequest::TYPE_ALL);
         $requestRead->addFilter("number", "eq", "+420111222333");
-        $requestRead->addFilter("name", "eq", "test_read3_".$this->hash);
+        $requestRead->addFilter("name", "eq", "test_read3_" . $this->hash);
         $responseRead = $client->execute($requestRead);
         self::assertNotNull($responseRead->getData());
         self::assertNotEmpty($responseRead->getData());
@@ -95,7 +97,7 @@ class ApiRequestTest extends TestCase
         self::assertGreaterThan(0, $responseRead->getData());
         self::assertArrayHasKey(0, $responseRead->getData());
         self::assertObjectHasAttribute("name", $responseRead->getData()[0]);
-        self::assertEquals("test_read3_".$this->hash, $responseRead->getData()[0]->name);
+        self::assertEquals("test_read3_" . $this->hash, $responseRead->getData()[0]->name);
     }
 
     public function testReadSingleRequest()
@@ -103,15 +105,15 @@ class ApiRequestTest extends TestCase
         $client = new Client($this->url, $this->accessToken);
         $request = new CreateRequest("CampaignsRecords");
 
-        $request->addStringAttribute("name", "test_read2_".$this->hash);
+        $request->addStringAttribute("name", "test_read2_" . $this->hash);
         $request->addStringAttribute("number", "+420111222333");
-        $request->addAttributes(["action" => 5, "queue" => 311831447]);
+        $request->addAttributes(["action" => 5, "queue" => $this->queue]);
         $response = $client->execute($request);
         self::assertEquals(201, $response->getHttpStatus());
 
         $requestRead = new ReadRequest("CampaignsRecords");
         $requestRead->setRequestType(ReadRequest::TYPE_SINGLE);
-        $requestRead->setObjectName("test_read2_".$this->hash);
+        $requestRead->setObjectName("test_read2_" . $this->hash);
         $responseRead = $client->execute($requestRead);
         self::assertNotNull($responseRead->getData());
         self::assertNotEmpty($responseRead->getData());
@@ -119,28 +121,28 @@ class ApiRequestTest extends TestCase
         self::assertEquals(200, $responseRead->getHttpStatus());
         self::assertEquals(1, $responseRead->getTotal());
         self::assertObjectHasAttribute("name", $responseRead->getData());
-        self::assertEquals("test_read2_".$this->hash, $responseRead->getData()->name);
+        self::assertEquals("test_read2_" . $this->hash, $responseRead->getData()->name);
     }
 
     public function testUpdateRequest()
     {
         $client = new Client($this->url, $this->accessToken);
         $request = new CreateRequest("CampaignsRecords");
-        $request->addStringAttribute("name", "test_update_".$this->hash)
+        $request->addStringAttribute("name", "test_update_" . $this->hash)
             ->addStringAttribute("number", "+420111222333")
-            ->addAttributes(["action" => 5, "queue" => 311831447]);
+            ->addAttributes(["action" => 5, "queue" => $this->queue]);
         $response = $client->execute($request);
         self::assertEquals(201, $response->getHttpStatus());
 
         $request = new UpdateRequest("CampaignsRecords");
-        $request->setObjectName("test_update_".$this->hash)
+        $request->setObjectName("test_update_" . $this->hash)
             ->addStringAttribute("number", "+420333222111")
             ->addAttributes(["action" => 0]);
         $response = $client->execute($request);
         self::assertNotNull($response->getData());
         self::assertEquals(200, $response->getHttpStatus());
         self::assertObjectHasAttribute('name', $response->getData());
-        self::assertEquals("test_update_".$this->hash, $response->getData()->name);
+        self::assertEquals("test_update_" . $this->hash, $response->getData()->name);
         self::assertEmpty($response->getErrors());
         self::assertEquals(1, $response->getTotal());
         self::assertEquals("+420333222111", $response->getData()->number);
@@ -150,14 +152,14 @@ class ApiRequestTest extends TestCase
     {
         $client = new Client($this->url, $this->accessToken);
         $request = new CreateRequest("CampaignsRecords");
-        $request->addStringAttribute("name", "test_delete_".$this->hash)
+        $request->addStringAttribute("name", "test_delete_" . $this->hash)
             ->addStringAttribute("number", "+420111222333")
-            ->addAttributes(["action" => 5, "queue" => 311831447]);
+            ->addAttributes(["action" => 5, "queue" => $this->queue]);
         $response = $client->execute($request);
         self::assertEquals(201, $response->getHttpStatus());
 
         $request = new DeleteRequest("CampaignsRecords");
-        $request->setObjectName("test_delete_".$this->hash);
+        $request->setObjectName("test_delete_" . $this->hash);
         $response = $client->execute($request);
         self::assertNull($response->getData());
         self::assertEquals(204, $response->getHttpStatus());

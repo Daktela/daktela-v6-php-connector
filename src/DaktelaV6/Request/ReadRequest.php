@@ -231,7 +231,7 @@ class ReadRequest extends ARequest
             $filters['filters'] = $filters;
         }
 
-        foreach ($filters['filters'] as $key => &$filter) {
+        foreach ($filters['filters'] as &$filter) {
             if (
                 is_array($filter)
                 && count($filter) == 3
@@ -305,7 +305,7 @@ class ReadRequest extends ARequest
     }
 
     /**
-     * Gets the read request type based on the constanst of the ReadRequest class.
+     * Gets the read request type based on the constants of the ReadRequest class.
      * @return int type of the read request
      */
     public function getRequestType(): int

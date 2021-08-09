@@ -3,7 +3,6 @@
 
 namespace Daktela\DaktelaV6\Utils;
 
-
 class FormatHelper
 {
 
@@ -16,17 +15,19 @@ class FormatHelper
 
     /**
      * @param string|null $number Not normalized number in any format
-     * @param bool $plusSign True if the number should be prefixed with "+" or false if the number should be prefixed with "00"
-     * @param string $intlPrefix Default internation prefix (e.g. "420" for Czech Republic)
-     * @param int $intlLength Threshold length of number to be considered as international if the start of the number is the international prefix (e.g. "420773794604")
+     * @param bool $plusSign True if the number should be prefixed with "+" or false if the number should be prefixed
+     * with "00"
+     * @param string $intlPrefix Default internation prefix (e.g. "420" for the Czech Republic)
+     * @param int $intlLength Threshold length of number to be considered as international if the start of the number is
+     * the international prefix (e.g. "420773794604")
      * @return string|null normalized number i "00"/"+" format
      */
     public static function getNormalizedPhoneNumber(
         ?string $number,
         bool $plusSign = false,
-        $intlPrefix = '420',
-        $intlLength = 12
-    ) {
+        string $intlPrefix = '420',
+        int $intlLength = 12
+    ): ?string {
         if (is_null($number)) {
             return null;
         }

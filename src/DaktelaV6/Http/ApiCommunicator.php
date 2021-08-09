@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Daktela\DaktelaV6\Http;
 
+use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Response\Response;
+use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\InvalidArgumentException;
 use GuzzleHttp\Psr7\Request;
@@ -65,7 +67,8 @@ class ApiCommunicator
      * @param string $apiEndpoint requested API endpoint based on the Daktela V6 API documentation
      * @param array $queryParams query parameters to be sent as part of the URL
      * @param array|null $data collection of data to be sent as request payload (or null when none)
-     * @return Response the resulting response of the sent request
+     * @return Response the resulting response of the request sent
+     * @throws RequestException request exception with details
      */
     public function sendRequest(
         string $method,
@@ -76,7 +79,7 @@ class ApiCommunicator
         $queryParams['accessToken'] = $this->accessToken;
 
         //Initialize the HTTP client
-        $client = new \GuzzleHttp\Client(
+        $client = new Client(
             [
                 'base_uri' => self::normalizeUrl($this->baseUrl),
                 'timeout' => $this->requestTimeout,
@@ -96,16 +99,10 @@ class ApiCommunicator
         $request = new Request($method, $requestUri, $headers, $body);
 
         //Send the request
-        $httpResponse = null;
         try {
             $httpResponse = $client->send($request);
         } catch (GuzzleException $ex) {
-            return new Response(
-                null,
-                -1,
-                [$ex->getMessage()],
-                !is_null($httpResponse) ? $httpResponse->getStatusCode() : 0
-            );
+            throw new RequestException($ex->getMessage(), $ex->getCode(), $ex);
         }
 
         //Handle JSON parsing and result return
@@ -114,13 +111,17 @@ class ApiCommunicator
             try {
                 $responseBody = Utils::jsonDecode($responseBody);
             } catch (InvalidArgumentException $ex) {
-                return new Response(null, -1, [$ex->getMessage()], $httpResponse->getStatusCode());
+                throw new RequestException($ex->getMessage(), $ex->getCode(), $ex);
             }
         }
 
+        if (!isset($responseBody->result)) {
+            return new Response(null, 0, [], $httpResponse->getStatusCode());
+        }
+
         $data = $responseBody->result->data ?? ($responseBody->result ?? null);
-        $total = $responseBody->result->total ?? (isset($responseBody->result) ? 1 : -1);
-        $errors = $responseBody->error ?? [];
+        $total = $responseBody->result->total ?? 1;
+        $errors = !isset($responseBody->error) ? [] : $responseBody->error;
 
         return new Response($data, $total, $errors, $httpResponse->getStatusCode());
     }

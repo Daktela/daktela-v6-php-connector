@@ -131,7 +131,7 @@ class ARequestWithAttributes extends ARequest
      * Returns the current set of attributes that is part of the request.
      * @return array current set of attributes to be sent as create request
      */
-    public function getAttributes()
+    public function getAttributes(): array
     {
         return $this->attributes;
     }

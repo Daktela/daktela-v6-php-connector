@@ -24,9 +24,9 @@ abstract class ARequest
 
     /**
      * ARequest constructor.
-     * @param $model name of the API model of the request
+     * @param string $model name of the API model of the request
      */
-    public function __construct($model)
+    public function __construct(string $model)
     {
         $this->model = $model;
     }

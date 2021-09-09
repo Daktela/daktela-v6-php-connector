@@ -110,6 +110,7 @@ class ReadRequest extends ARequest
      * @param string $field field used for sorting
      * @param string $dir direction of the sorting
      * @return $this current instance of the request to be used as builder pattern
+     * @noinspection PhpUnused
      */
     public function addSort(string $field, string $dir): self
     {
@@ -140,6 +141,7 @@ class ReadRequest extends ARequest
      * Sets the required fields array.
      * @param array $fields array of fields required by the request
      * @return $this current instance of the request to be used as builder pattern
+     * @noinspection PhpUnused
      */
     public function setFields(array $fields): self
     {
@@ -161,6 +163,7 @@ class ReadRequest extends ARequest
      * Sets the take limit of the current request.
      * @param int $take take limit of the current request
      * @return $this current instance of the request to be used as builder pattern
+     * @noinspection PhpUnused
      */
     public function setTake(int $take): self
     {
@@ -182,6 +185,7 @@ class ReadRequest extends ARequest
      * Sets the skip offset of the current request.
      * @param int $skip skip offset of the current request
      * @return $this current instance of the request to be used as builder pattern
+     * @noinspection PhpUnused
      */
     public function setSkip(int $skip): self
     {
@@ -203,6 +207,7 @@ class ReadRequest extends ARequest
      * Sets if the error requests shall be skipped when using the TYPE_ALL request type.
      * @param bool $skipErrorRequests flag if the error requests shall be skipped
      * @return $this current instance of the request to be used as builder pattern
+     * @noinspection PhpUnused
      */
     public function setSkipErrorRequests(bool $skipErrorRequests): self
     {
@@ -232,8 +237,7 @@ class ReadRequest extends ARequest
         }
 
         foreach ($filters['filters'] as &$filter) {
-            if (
-                is_array($filter)
+            if (is_array($filter)
                 && count($filter) == 3
                 && array_key_exists(0, $filter) && array_key_exists(1, $filter) && array_key_exists(2, $filter)
                 && is_string($filter[0]) && is_string($filter[1]) && is_string($filter[2])

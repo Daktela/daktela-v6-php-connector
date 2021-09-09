@@ -43,6 +43,7 @@ abstract class ARequest
     /**
      * Sets the request as already executed or not.
      * @param bool $executed boolean value if the request has already been executed
+     * @noinspection PhpUnused
      */
     public function setExecuted(bool $executed)
     {
@@ -52,6 +53,7 @@ abstract class ARequest
     /**
      * Sets the response of the request.
      * @param Response $response response of the request
+     * @noinspection PhpUnused
      */
     public function setResponse(Response $response)
     {
@@ -81,6 +83,7 @@ abstract class ARequest
      * @param string $key key of the query string parameter
      * @param string $value value of the query string parameter
      * @return $this current instance of the request to be used as builder pattern
+     * @noinspection PhpUnused
      */
     public function addAdditionalQueryParameter(string $key, string $value): self
     {

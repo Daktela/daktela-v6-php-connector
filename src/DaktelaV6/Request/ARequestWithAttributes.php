@@ -15,6 +15,7 @@ class ARequestWithAttributes extends ARequest
      * @param string $key key of the attribute to be added
      * @param mixed $value value of attribute to be added
      * @return $this current instance of the create request to be used as builder pattern
+     * @noinspection PhpUnused
      */
     public function addAttribute(string $key, $value): self
     {

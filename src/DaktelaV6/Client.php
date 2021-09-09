@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Daktela\DaktelaV6;
 
 use Daktela\DaktelaV6\Exception\NotFoundException;
+use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Exception\UnknownRequestTypeException;
 use Daktela\DaktelaV6\Http\ApiCommunicator;
 use Daktela\DaktelaV6\Request\ARequest;
@@ -41,6 +42,7 @@ class Client
      * Client constructor.
      * @param string $instance URL of the Daktela instance the client is connecting to
      * @param string $accessToken access token of the connecting user
+     * @noinspection PhpUnused
      */
     public function __construct(string $instance, string $accessToken)
     {
@@ -52,6 +54,7 @@ class Client
      * @param string $instance URL of the Daktela instance the client is connecting to
      * @param string $accessToken access token of the connecting user
      * @return Client instance of the Daktela client class
+     * @noinspection PhpUnused
      */
     public static function getInstance(string $instance, string $accessToken): self
     {
@@ -70,7 +73,8 @@ class Client
      * @param ARequest $request instance of the request to be performed on the Daktela API
      * @return Response immutable object containing the response information
      * @throws UnknownRequestTypeException a request type has been specified incorrectly
-     * @throws NotFoundException data could not be found using provided conditions
+     * @throws RequestException a request exception has occurred
+     * @noinspection PhpUnused
      */
     public function execute(ARequest $request): Response
     {
@@ -102,6 +106,7 @@ class Client
      * Performs the Creation action (POST).
      * @param CreateRequest $request instance of the request to be performed on the Daktela API
      * @return Response immutable object containing the response information
+     * @throws RequestException a request exception has occurred
      */
     private function executeCreate(CreateRequest $request): Response
     {
@@ -117,7 +122,7 @@ class Client
      * Performs the Update action (PUT).
      * @param UpdateRequest $request instance of the request to be performed on the Daktela API
      * @return Response immutable object containing the response information
-     * @throws NotFoundException data could not be found using provided conditions
+     * @throws RequestException a request exception has occurred
      */
     private function executeUpdate(UpdateRequest $request): Response
     {
@@ -137,7 +142,7 @@ class Client
      * Performs the Delete action (DELETE)
      * @param DeleteRequest $request instance of the request to be performed on the Daktela API
      * @return Response immutable object containing the response information
-     * @throws NotFoundException data could not be found using provided conditions
+     * @throws RequestException a request exception has occurred
      */
     private function executeDelete(DeleteRequest $request): Response
     {
@@ -156,6 +161,7 @@ class Client
      * Performs the Read action (GET) when the client is requesting multiple resulting records.
      * @param ReadRequest $request instance of the request to be performed on the Daktela API
      * @return Response immutable object containing the response information
+     * @throws RequestException a request exception has occurred
      */
     private function executeReadMultiple(ReadRequest $request): Response
     {
@@ -168,6 +174,8 @@ class Client
                 'sort' => $request->getSorts(),
             ]
         );
+
+        /** @noinspection DuplicatedCode */
         if (count($request->getFields()) > 0) {
             $queryParams = array_merge($queryParams, $request->getFields());
         }
@@ -187,6 +195,7 @@ class Client
      * the READ_LIMIT specified as constant of this class.
      * @param ReadRequest $request instance of the request to be performed on the Daktela API
      * @return Response immutable object containing the response information
+     * @throws RequestException a request exception has occurred
      */
     private function executeReadAll(ReadRequest $request): Response
     {
@@ -201,6 +210,8 @@ class Client
                     'sort' => $request->getSorts(),
                 ]
             );
+
+            /** @noinspection DuplicatedCode */
             if (count($request->getFields()) > 0) {
                 $queryParams = array_merge($queryParams, $request->getFields());
             }
@@ -243,7 +254,7 @@ class Client
      * Performs the Read action (GET) when the client is requesting single object.
      * @param ReadRequest $request instance of the request to be performed on the Daktela API
      * @return Response immutable object containing the response information
-     * @throws NotFoundException data could not be found using provided conditions
+     * @throws RequestException a request exception has occurred
      */
     private function executeReadSingle(ReadRequest $request): Response
     {
@@ -266,6 +277,7 @@ class Client
     /**
      * Returns the API communicator assigned to the current Daktela V6 client instance.
      * @return ApiCommunicator|null API communicator assigned to the current Daktela V6 client instance
+     * @noinspection PhpPhpUnused
      */
     public function getApiCommunicator(): ?ApiCommunicator
     {

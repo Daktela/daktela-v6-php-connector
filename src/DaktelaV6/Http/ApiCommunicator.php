@@ -129,6 +129,7 @@ class ApiCommunicator
     /**
      * The HTTP request timeout that should be used when communicating with the associated API.
      * @param float $requestTimeout Timeout of the HTTP request
+     * @noinspection PhpPhpUnused
      */
     public function setRequestTimeout(float $requestTimeout): void
     {
@@ -146,6 +147,7 @@ class ApiCommunicator
             return null;
         }
 
+        /** @noinspection HttpUrlsUsage */
         if ((mb_substr($url, 0, 7) != "http://") && (mb_substr($url, 0, 8) != "https://")) {
             $url = "https://" . $url;
         }

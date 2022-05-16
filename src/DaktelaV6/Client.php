@@ -177,7 +177,7 @@ class Client
 
         /** @noinspection DuplicatedCode */
         if (count($request->getFields()) > 0) {
-            $queryParams = array_merge($queryParams, $request->getFields());
+            $queryParams = array_merge($queryParams, ['fields' => $request->getFields()]);
         }
 
         //Define the API endpoint (if relational data are read, read them)
@@ -213,7 +213,7 @@ class Client
 
             /** @noinspection DuplicatedCode */
             if (count($request->getFields()) > 0) {
-                $queryParams = array_merge($queryParams, $request->getFields());
+                $queryParams = array_merge($queryParams, ['fields' => $request->getFields()]);
             }
 
             //Define the API endpoint (if relational data are read, read them)
@@ -264,7 +264,7 @@ class Client
 
         $queryParams = $request->getAdditionalQueryParameters();
         if (count($request->getFields()) > 0) {
-            $queryParams = array_merge($queryParams, $request->getFields());
+            $queryParams = array_merge($queryParams, ['fields' => $request->getFields()]);
         }
 
         return $this->apiCommunicator->sendRequest(

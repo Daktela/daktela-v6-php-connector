@@ -2,7 +2,7 @@
   "name": "daktela/daktela-v6-php-connector",
   "description": "Enables connecting to Daktela V6 installation REST API from PHP code",
   "minimum-stability": "stable",
-  "license": "proprietary",
+  "license": "Apache-2.0",
   "authors": [
     {
       "name": "Daktela",

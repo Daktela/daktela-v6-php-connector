@@ -179,7 +179,7 @@ class Client
         if (count($request->getFields()) > 0) {
             //The `$request->getFields()['fields'] ?: $request->getFields()` syntax is a workaround that will be removed in future versions
             $fields = $request->getFields();
-            $queryParams = array_merge($queryParams, ['fields' => $fields['fields'] ?: $fields]);
+            $queryParams = array_merge($queryParams, ['fields' => $fields['fields'] ?? $fields]);
         }
 
         //Define the API endpoint (if relational data are read, read them)
@@ -217,7 +217,7 @@ class Client
             if (count($request->getFields()) > 0) {
                 //The `$request->getFields()['fields'] ?: $request->getFields()` syntax is a workaround that will be removed in future versions
                 $fields = $request->getFields();
-                $queryParams = array_merge($queryParams, ['fields' => $fields['fields'] ?: $fields]);
+                $queryParams = array_merge($queryParams, ['fields' => $fields['fields'] ?? $fields]);
             }
 
             //Define the API endpoint (if relational data are read, read them)
@@ -270,7 +270,7 @@ class Client
         if (count($request->getFields()) > 0) {
             //The `$request->getFields()['fields'] ?: $request->getFields()` syntax is a workaround that will be removed in future versions
             $fields = $request->getFields();
-            $queryParams = array_merge($queryParams, ['fields' => $fields['fields'] ?: $fields]);
+            $queryParams = array_merge($queryParams, ['fields' => $fields['fields'] ?? $fields]);
         }
 
         return $this->apiCommunicator->sendRequest(

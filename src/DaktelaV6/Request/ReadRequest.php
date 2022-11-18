@@ -282,7 +282,7 @@ class ReadRequest extends ARequest
      */
     public function setRelation(string $relation): self
     {
-        $this->relation = $relation;
+        $this->relation = lcfirst($relation);
 
         return $this;
     }

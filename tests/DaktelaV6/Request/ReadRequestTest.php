@@ -51,6 +51,26 @@ class ReadRequestTest extends TestCase
         self::assertEquals($filters["filters"][1]["value"], "0");
     }
 
+  public function testAddSingleFilterWithArrayAsValue()
+  {
+    $request = new ReadRequest($this->url, $this->accessToken, "Tickets");
+
+    $request->addFilter("stage", "in", ["OPEN", "WAIT"]);
+    $filters = $request->getFilters();
+
+    self::assertArrayHasKey("logic", $filters);
+    self::assertArrayHasKey("filters", $filters);
+    self::assertCount(1, $filters["filters"]);
+    self::assertArrayHasKey("field", $filters["filters"][0]);
+    self::assertArrayHasKey("operator", $filters["filters"][0]);
+    self::assertArrayHasKey("value", $filters["filters"][0]);
+
+    self::assertEquals($filters["logic"], "and");
+    self::assertEquals($filters["filters"][0]["field"], "stage");
+    self::assertEquals($filters["filters"][0]["operator"], "in");
+    self::assertEquals($filters["filters"][0]["value"], ["OPEN", "WAIT"]);
+  }
+
     public function testAddFilterFromArray()
     {
         $request = new ReadRequest($this->url, $this->accessToken, "Users");

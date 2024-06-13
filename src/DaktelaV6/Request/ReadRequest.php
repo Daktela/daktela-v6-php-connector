@@ -54,14 +54,14 @@ class ReadRequest extends ARequest
     /** @var string|null Variable containing the relation of the object to be returned when using the TYPE_MULTIPLE request type */
     private $relation = null;
 
-    /**
-     * Adds the filter to the current request type.
-     * @param string $field name of the field
-     * @param string $operator operator of the filter
-     * @param string $value value used for filtering
-     * @return $this current instance of the request to be used as builder pattern
-     */
-    public function addFilter(string $field, string $operator, string $value): self
+  /**
+   * Adds the filter to the current request type.
+   * @param string $field name of the field
+   * @param string $operator operator of the filter
+   * @param string|array $value value used for filtering
+   * @return $this current instance of the request to be used as builder pattern
+   */
+    public function addFilter(string $field, string $operator, string|array $value): self
     {
         $newFilter = ['field' => $field, 'operator' => $operator, 'value' => $value];
 

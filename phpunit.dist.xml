@@ -8,5 +8,6 @@
     <php>
         <env name="INSTANCE" value=""/>
         <env name="ACCESS_TOKEN" value=""/>
+        <env name="RECORD_TYPE" value=""/>
     </php>
 </phpunit>

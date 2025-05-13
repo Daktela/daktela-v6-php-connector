@@ -240,7 +240,7 @@ class ReadRequest extends ARequest
             if (is_array($filter)
                 && count($filter) == 3
                 && array_key_exists(0, $filter) && array_key_exists(1, $filter) && array_key_exists(2, $filter)
-                && is_string($filter[0]) && is_string($filter[1]) && is_string($filter[2])
+                && is_string($filter[0]) && is_string($filter[1]) && (is_string($filter[2]) || is_array($filter[2]))
             ) {
                 $filter["field"] = $filter[0];
                 $filter["operator"] = $filter[1];

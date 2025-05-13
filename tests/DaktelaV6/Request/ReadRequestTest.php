@@ -102,6 +102,32 @@ class ReadRequestTest extends TestCase
         self::assertEquals($filters["filters"][1]["value"], "0");
     }
 
+  public function testAddShortHandFilterWithArrayFromArray()
+  {
+    $request = new ReadRequest($this->url, $this->accessToken, "Users");
+
+    $filters = [
+      ["type", "in", ["SMS", "EMAIL", "CALL"]],
+    ];
+
+    $request->addFilterFromArray($filters);
+    $filters = $request->getFilters();
+
+    self::assertArrayHasKey("logic", $filters);
+    self::assertArrayHasKey("filters", $filters);
+    self::assertCount(1, $filters["filters"]);
+    self::assertArrayHasKey("field", $filters["filters"][0]);
+    self::assertArrayHasKey("operator", $filters["filters"][0]);
+    self::assertArrayHasKey("value", $filters["filters"][0]);
+
+    self::assertEquals($filters["logic"], "and");
+    self::assertEquals($filters["filters"][0]["field"], "type");
+    self::assertEquals($filters["filters"][0]["operator"], "in");
+    self::assertEquals($filters["filters"][0]["value"][0], "SMS");
+    self::assertEquals($filters["filters"][0]["value"][1], "EMAIL");
+    self::assertEquals($filters["filters"][0]["value"][2], "CALL");
+  }
+
     public function testAddOrFilterFromArray()
     {
         $request = new ReadRequest($this->url, $this->accessToken, "Users");

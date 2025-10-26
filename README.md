@@ -2,6 +2,14 @@
 
 Daktela V6 PHP Connector is a library that enables your PHP application to connect to your [Daktela V6 REST API](https://customer.daktela.com/apihelp/v6/global/general-information). This connector requires you to have the [Daktela Contact Centre](https://daktela.com) application already purchased, installed, and ready for use. The Daktela Contact Centre is an application enabling all-in-one handling of all customer communication coming through various channels, for example calls, e-mails, web chats, SMS, or social media.
 
+## Installation
+
+The recommended way to install is through Composer:
+
+```bash
+composer require daktela/daktela-v6-php-connector
+```
+
 ## Setup
 
 The connector requires following prerequisites:

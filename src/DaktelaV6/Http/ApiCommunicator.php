@@ -33,29 +33,33 @@ class ApiCommunicator
     private $accessToken;
     /** @var float Timeout for HTTP request sent to API */
     private $requestTimeout = 2.0;
-
+    /** @var bool Whether to send the token as a query parameter or in the header. If true, the token will be appended to the URL as a query parameter. If false, the token will be appended to the X-AUTH-TOKEN header. */
+    private $sendTokenInQuery = false;
     /**
      * ApiCommunicator constructor.
      * @param string $baseUrl URL of the Daktela instance
      * @param string $accessToken access token of user used for connecting to Daktela V6
+     * @param bool $sendTokenInQuery whether send the token as a query parameter or in the header
      */
-    public function __construct(string $baseUrl, string $accessToken)
+    public function __construct(string $baseUrl, string $accessToken, bool $sendTokenInQuery = false)
     {
         $this->baseUrl = $baseUrl;
         $this->accessToken = $accessToken;
+        $this->sendTokenInQuery = $sendTokenInQuery;
     }
 
     /**
      * Static method for using ApiCommunicator client connector as singleton.
      * @param string $baseUrl URL of the Daktela instance
      * @param string $accessToken access token of user used for connecting to Daktela V6
+     * @param bool $sendTokenInQuery whether send the token as a query parameter or in the header
      * @return ApiCommunicator instance of the transport class
      */
-    public static function getInstance(string $baseUrl, string $accessToken): self
+    public static function getInstance(string $baseUrl, string $accessToken, bool $sendTokenInQuery = false): self
     {
         $key = md5($baseUrl . $accessToken);
         if (!isset(self::$singletons[$key])) {
-            self::$singletons[$key] = new ApiCommunicator($baseUrl, $accessToken);
+            self::$singletons[$key] = new ApiCommunicator($baseUrl, $accessToken, $sendTokenInQuery);
         }
 
         return self::$singletons[$key];
@@ -76,8 +80,6 @@ class ApiCommunicator
         array $queryParams = [],
         ?array $data = null
     ): Response {
-        $queryParams['accessToken'] = $this->accessToken;
-
         //Initialize the HTTP client
         $client = new Client(
             [
@@ -87,6 +89,12 @@ class ApiCommunicator
             ]
         );
         $headers = ["User-Agent" => self::USER_AGENT, "Content-Type" => "application/json"];
+
+        if ($this->sendTokenInQuery) {
+            $queryParams['accessToken'] = $this->accessToken;
+        } else {
+            $headers['X-AUTH-TOKEN'] = $this->accessToken;
+        }
 
         //Prepare request URI
         $requestUri = self::API_NAMESPACE . lcfirst($apiEndpoint) . ".json?" . http_build_query($queryParams);

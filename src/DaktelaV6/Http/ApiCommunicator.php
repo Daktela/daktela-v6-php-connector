@@ -19,6 +19,11 @@ use GuzzleHttp\Utils;
  */
 class ApiCommunicator
 {
+    /** @var int Authentication method using HTTP header X-AUTH-TOKEN */
+    const AUTHENTICATION_METHOD_HEADER = 1;
+    /** @var int Authentication method using query parameter accessToken */
+    const AUTHENTICATION_METHOD_QUERY = 2;
+    
     /** @var string Constant defining the base API URL */
     private const API_NAMESPACE = "/api/v6/";
     /** @var string Constant defining the User-Agent of the HTTP requests */
@@ -33,33 +38,31 @@ class ApiCommunicator
     private $accessToken;
     /** @var float Timeout for HTTP request sent to API */
     private $requestTimeout = 2.0;
-    /** @var bool Whether to send the token as a query parameter or in the header. If true, the token will be appended to the URL as a query parameter. If false, the token will be appended to the X-AUTH-TOKEN header. */
-    private $sendTokenInQuery = false;
+    /** @var int The authentication method to use */
+    private $authenticationMethod = self::AUTHENTICATION_METHOD_HEADER;
+
     /**
      * ApiCommunicator constructor.
      * @param string $baseUrl URL of the Daktela instance
      * @param string $accessToken access token of user used for connecting to Daktela V6
-     * @param bool $sendTokenInQuery whether send the token as a query parameter or in the header
      */
-    public function __construct(string $baseUrl, string $accessToken, bool $sendTokenInQuery = false)
+    public function __construct(string $baseUrl, string $accessToken)
     {
         $this->baseUrl = $baseUrl;
         $this->accessToken = $accessToken;
-        $this->sendTokenInQuery = $sendTokenInQuery;
     }
 
     /**
      * Static method for using ApiCommunicator client connector as singleton.
      * @param string $baseUrl URL of the Daktela instance
      * @param string $accessToken access token of user used for connecting to Daktela V6
-     * @param bool $sendTokenInQuery whether send the token as a query parameter or in the header
      * @return ApiCommunicator instance of the transport class
      */
-    public static function getInstance(string $baseUrl, string $accessToken, bool $sendTokenInQuery = false): self
+    public static function getInstance(string $baseUrl, string $accessToken): self
     {
         $key = md5($baseUrl . $accessToken);
         if (!isset(self::$singletons[$key])) {
-            self::$singletons[$key] = new ApiCommunicator($baseUrl, $accessToken, $sendTokenInQuery);
+            self::$singletons[$key] = new ApiCommunicator($baseUrl, $accessToken);
         }
 
         return self::$singletons[$key];
@@ -90,7 +93,7 @@ class ApiCommunicator
         );
         $headers = ["User-Agent" => self::USER_AGENT, "Content-Type" => "application/json"];
 
-        if ($this->sendTokenInQuery) {
+        if ($this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY) {
             $queryParams['accessToken'] = $this->accessToken;
         } else {
             $headers['X-AUTH-TOKEN'] = $this->accessToken;
@@ -164,5 +167,18 @@ class ApiCommunicator
         }
 
         return $url;
+    }
+
+    /**
+     * Sets the authentication method to use.
+     * @param int $authenticationMethod Authentication method to use
+     * @throws RequestException if the authentication method is invalid
+     */
+    public function setAuthenticationMethod(int $authenticationMethod): void
+    {
+        if ($authenticationMethod !== self::AUTHENTICATION_METHOD_HEADER && $authenticationMethod !== self::AUTHENTICATION_METHOD_QUERY) {
+            throw new RequestException('Invalid authentication method');
+        }
+        $this->authenticationMethod = $authenticationMethod;
     }
 }

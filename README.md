@@ -186,3 +186,43 @@ try {
     //Exception handling
 }
 ```
+
+## Authentication Methods
+
+The connector supports two authentication methods for passing the access token to the Daktela V6 API:
+
+### 1. Header-based Authentication (Default)
+
+By default, the access token is sent via the `X-AUTH-TOKEN` HTTP header. This is the recommended method as it keeps the token out of URLs and logs.
+
+```php
+use Daktela\DaktelaV6\Client;
+use Daktela\DaktelaV6\Http\ApiCommunicator;
+
+$client = new Client($instance, $accessToken);
+// Token is automatically sent via X-AUTH-TOKEN header
+```
+
+### 2. Query Parameter Authentication
+
+Alternatively, you can send the access token as a query parameter (`accessToken`). This method may be useful for compatibility with certain proxy configurations or firewall rules.
+
+```php
+use Daktela\DaktelaV6\Client;
+use Daktela\DaktelaV6\Http\ApiCommunicator;
+
+$client = new Client($instance, $accessToken);
+$client->getApiCommunicator()->setAuthenticationMethod(
+    ApiCommunicator::AUTHENTICATION_METHOD_QUERY
+);
+```
+
+To switch back to header-based authentication:
+
+```php
+$client->getApiCommunicator()->setAuthenticationMethod(
+    ApiCommunicator::AUTHENTICATION_METHOD_HEADER
+);
+```
+
+**Security Note:** Header-based authentication is recommended for production use as it prevents the access token from appearing in server logs, browser history, and other places where URLs are typically recorded.

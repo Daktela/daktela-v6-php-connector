@@ -2,31 +2,13 @@
 
 namespace Daktela\DaktelaV6\Request;
 
-use PHPUnit\Framework\SkippedTestSuiteError;
 use PHPUnit\Framework\TestCase;
 
 class ReadRequestTest extends TestCase
 {
-    private $hash;
-    private $url;
-    private $accessToken;
-
-    public function setUp(): void
-    {
-        parent::setUp();
-
-        $this->hash = md5(uniqid());
-        $this->url = getenv("INSTANCE");
-        $this->accessToken = getenv("ACCESS_TOKEN");
-
-        if (is_null($this->url) || empty($this->url) || is_null($this->accessToken) || empty($this->accessToken)) {
-            throw new SkippedTestSuiteError('Missing URL or Access token in phpunit.xml');
-        }
-    }
-
     public function testAddFilter()
     {
-        $request = new ReadRequest($this->url, $this->accessToken, "Users");
+        $request = new ReadRequest("Users");
 
         $request->addFilter("edited", "lte", "2020-11-30 23:59:59");
         $request->addFilter("action", "eq", "0");
@@ -53,7 +35,7 @@ class ReadRequestTest extends TestCase
 
   public function testAddSingleFilterWithArrayAsValue()
   {
-    $request = new ReadRequest($this->url, $this->accessToken, "Tickets");
+    $request = new ReadRequest("Tickets");
 
     $request->addFilter("stage", "in", ["OPEN", "WAIT"]);
     $filters = $request->getFilters();
@@ -73,7 +55,7 @@ class ReadRequestTest extends TestCase
 
     public function testAddFilterFromArray()
     {
-        $request = new ReadRequest($this->url, $this->accessToken, "Users");
+        $request = new ReadRequest("Users");
 
         $filters = [
             ["field" => "edited", "operator" => "lte", "value" => "2020-11-30 23:59:59"],
@@ -104,7 +86,7 @@ class ReadRequestTest extends TestCase
 
   public function testAddShortHandFilterWithArrayFromArray()
   {
-    $request = new ReadRequest($this->url, $this->accessToken, "Users");
+    $request = new ReadRequest("Users");
 
     $filters = [
       ["type", "in", ["SMS", "EMAIL", "CALL"]],
@@ -130,7 +112,7 @@ class ReadRequestTest extends TestCase
 
     public function testAddOrFilterFromArray()
     {
-        $request = new ReadRequest($this->url, $this->accessToken, "Users");
+        $request = new ReadRequest("Users");
 
         $filters = [
             ["field" => "edited", "operator" => "lte", "value" => "2020-11-30 23:59:59"],
@@ -166,7 +148,7 @@ class ReadRequestTest extends TestCase
 
     public function testAddCombinedFilters()
     {
-        $request = new ReadRequest($this->url, $this->accessToken, "Users");
+        $request = new ReadRequest("Users");
 
         $request->addFilter("edited", "lte", "2020-11-30 23:59:59");
         $request->addFilter("action", "eq", "0");

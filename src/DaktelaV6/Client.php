@@ -8,6 +8,7 @@ use Daktela\DaktelaV6\Exception\NotFoundException;
 use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Exception\UnknownRequestTypeException;
 use Daktela\DaktelaV6\Http\ApiCommunicator;
+use Daktela\DaktelaV6\Iterator\PaginatedIterator;
 use Daktela\DaktelaV6\Request\ARequest;
 use Daktela\DaktelaV6\Request\CreateRequest;
 use Daktela\DaktelaV6\Request\DeleteRequest;
@@ -288,5 +289,53 @@ class Client
     public function getApiCommunicator(): ?ApiCommunicator
     {
         return $this->apiCommunicator;
+    }
+
+    /**
+     * Performs a health check to verify API connectivity.
+     *
+     * @return bool True if the API is reachable and responding
+     */
+    public function ping(): bool
+    {
+        return $this->apiCommunicator->ping();
+    }
+
+    /**
+     * Performs a detailed health check.
+     *
+     * @return array{healthy: bool, latency_ms: float, status_code?: int, error?: string}
+     */
+    public function healthCheck(): array
+    {
+        return $this->apiCommunicator->healthCheck();
+    }
+
+    /**
+     * Creates a memory-efficient iterator for paginating through large datasets.
+     *
+     * Example usage:
+     * ```php
+     * $request = RequestFactory::buildReadRequest("Users")
+     *     ->addFilter("active", "eq", "1");
+     *
+     * foreach ($client->iterate($request) as $user) {
+     *     echo $user->name;
+     * }
+     * ```
+     *
+     * @param ReadRequest $request The base read request (will be cloned and modified for pagination)
+     * @param int $pageSize Number of items per page (default: 100)
+     * @param int|null $maxItems Maximum items to return (null for unlimited)
+     * @param bool $stopOnError Whether to stop iteration on first error (default: true)
+     * @return PaginatedIterator
+     */
+    public function iterate(
+        ReadRequest $request,
+        int $pageSize = 100,
+        ?int $maxItems = null,
+        bool $stopOnError = true
+    ): PaginatedIterator {
+        return new PaginatedIterator($this, $request, $pageSize, $maxItems, $stopOnError);
     }
 }

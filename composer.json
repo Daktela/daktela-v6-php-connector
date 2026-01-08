@@ -15,8 +15,9 @@
   ],
   "require": {
     "php": ">=8.0",
-    "guzzlehttp/guzzle": "7.*",
-    "ext-mbstring": "*"
+    "guzzlehttp/guzzle": "^7.0",
+    "ext-mbstring": "*",
+    "psr/log": "^1.0 || ^2.0 || ^3.0"
   },
   "require-dev": {
     "phpunit/phpunit": "^9.6",
@@ -26,6 +27,11 @@
   "autoload": {
     "psr-4": {
       "Daktela\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Daktela\\Tests\\": "tests/"
     }
   }
 }

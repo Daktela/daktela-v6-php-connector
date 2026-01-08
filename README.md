@@ -270,3 +270,177 @@ $client->getApiCommunicator()->setAuthenticationMethod(
 ```
 
 **Security Note:** Header-based authentication is recommended for production use as it prevents the access token from appearing in server logs, browser history, and other places where URLs are typically recorded.
+
+## Advanced Configuration
+
+### SSL Verification
+
+By default, SSL certificates are verified. For development environments with self-signed certificates, you can disable verification:
+
+```php
+$client->getApiCommunicator()->setVerifySsl(false);
+```
+
+**Warning:** Never disable SSL verification in production.
+
+### Custom User-Agent
+
+You can append a custom suffix to the User-Agent header for tracking purposes:
+
+```php
+$client->getApiCommunicator()->setUserAgentSuffix('MyApp/1.0');
+// Results in: "daktela-v6-php-connector MyApp/1.0"
+```
+
+### Logging
+
+The connector supports PSR-3 compatible loggers for debugging:
+
+```php
+use Psr\Log\LoggerInterface;
+
+// Using any PSR-3 logger (Monolog, etc.)
+$client->getApiCommunicator()->setLogger($logger);
+```
+
+### Custom HTTP Client
+
+You can inject a custom Guzzle HTTP client for advanced configurations (proxies, middleware, etc.):
+
+```php
+use GuzzleHttp\Client as GuzzleClient;
+
+$httpClient = new GuzzleClient([
+    'proxy' => 'http://proxy.example.com:8080',
+    'timeout' => 60,
+]);
+
+$client->getApiCommunicator()->setHttpClient($httpClient);
+```
+
+## Retry Mechanism
+
+The connector supports automatic retries with exponential backoff for transient failures:
+
+```php
+use Daktela\DaktelaV6\Http\RetryConfig;
+
+$client->getApiCommunicator()->setRetryConfig(new RetryConfig(
+    maxRetries: 3,           // Number of retry attempts
+    baseDelayMs: 100,        // Initial delay in milliseconds
+    maxDelayMs: 10000,       // Maximum delay between retries
+    multiplier: 2.0,         // Exponential backoff multiplier
+    retryableStatusCodes: [500, 502, 503, 504],
+    retryOnConnectionError: true
+));
+
+// Quick presets
+$client->getApiCommunicator()->setRetryConfig(RetryConfig::aggressive()); // 5 retries
+$client->getApiCommunicator()->setRetryConfig(RetryConfig::disabled());   // No retries
+```
+
+## Rate Limit Handling
+
+The connector can automatically handle rate limiting (HTTP 429 responses):
+
+```php
+use Daktela\DaktelaV6\Http\RateLimitConfig;
+
+$client->getApiCommunicator()->setRateLimitConfig(new RateLimitConfig(
+    autoRetry: true,         // Automatically wait and retry
+    maxWaitSeconds: 60,      // Maximum time to wait
+    defaultWaitSeconds: 5    // Default wait if Retry-After header missing
+));
+```
+
+If rate limiting occurs and `autoRetry` is disabled, a `RateLimitException` is thrown:
+
+```php
+use Daktela\DaktelaV6\Exception\RateLimitException;
+
+try {
+    $response = $client->execute($request);
+} catch (RateLimitException $ex) {
+    $waitSeconds = $ex->getRetryAfterSeconds();
+    // Handle rate limiting
+}
+```
+
+## Health Check
+
+You can verify API connectivity before making requests:
+
+```php
+// Simple ping
+if ($client->ping()) {
+    echo "API is reachable";
+}
+
+// Detailed health check
+$health = $client->healthCheck();
+// Returns: ['healthy' => true, 'latency_ms' => 45.2, 'status_code' => 200]
+// Or on error: ['healthy' => false, 'latency_ms' => 1000.5, 'error' => 'Connection refused']
+```
+
+## Memory-Efficient Iteration
+
+For large datasets, use the iterator to process records one at a time without loading everything into memory:
+
+```php
+$request = RequestFactory::buildReadRequest("CampaignsRecords")
+    ->addFilter("created", "gte", "2020-01-01 00:00:00");
+
+// Iterate over all records
+foreach ($client->iterate($request) as $record) {
+    echo $record->name;
+}
+
+// With options
+$iterator = $client->iterate(
+    $request,
+    pageSize: 100,      // Records per API call
+    maxItems: 1000,     // Stop after 1000 items
+    stopOnError: true   // Stop on first error
+);
+
+// Helper methods
+$first = $iterator->first();           // Get first item
+$all = $iterator->toArray();           // Collect all to array
+$count = $iterator->count();           // Count all items
+$isEmpty = $iterator->isEmpty();       // Check if empty
+
+// Functional operations
+$iterator->each(fn($item) => process($item));
+$filtered = $iterator->filter(fn($item) => $item->active);
+$mapped = $iterator->map(fn($item) => $item->name);
+
+// Iterate over pages (for access to total counts)
+foreach ($iterator->pages() as $response) {
+    echo "Total: " . $response->getTotal();
+    foreach ($response->getData() as $item) {
+        // Process item
+    }
+}
+```
+
+## Response Helper Methods
+
+The response object provides convenient helper methods:
+
+```php
+$response = $client->execute($request);
+
+// Check success (HTTP 2xx)
+if ($response->isSuccess()) {
+    $data = $response->getData();
+}
+
+// Check for errors
+if ($response->hasErrors()) {
+    $firstError = $response->getFirstError();
+}
+
+// Check if data is empty
+if ($response->isEmpty()) {
+    echo "No records found";
+}

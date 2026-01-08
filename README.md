@@ -17,6 +17,19 @@ The connector requires following prerequisites:
 * Instance URL in the form of https://URL/
 * Access token for each access to the Daktela V6 REST API based on required permissions
 
+## Configuration
+
+### HTTP Request Timeout
+
+The default HTTP request timeout is 2 seconds. For operations that may take longer (e.g., reading large datasets), you can increase the timeout:
+
+```php
+use Daktela\DaktelaV6\Client;
+
+$client = new Client($instance, $accessToken);
+$client->getApiCommunicator()->setRequestTimeout(30.0); // 30 seconds
+```
+
 ## Usage
 
 There are two ways you can use the Daktela V6 PHP Connector:
@@ -105,6 +118,14 @@ $request = RequestFactory::buildReadRequest("CampaignsRecords")
 $response = $client->execute($request);
 ```
 
+To limit which fields are returned in the response, use the `setFields()` method:
+
+```php
+$request = RequestFactory::buildReadRequest("Users")
+    ->setFields(['name', 'email', 'title']);
+$response = $client->execute($request);
+```
+
 If you don't want to handle pagination, use the following request type to read all records:
 
 ```php
@@ -112,6 +133,15 @@ $request = RequestFactory::buildReadRequest("CampaignsRecords")
     ->setRequestType(ReadRequest::TYPE_ALL)
     ->addFilter("created", "gte", "2020-11-01 00:00:00")
     ->addSort("created", "asc");
+$response = $client->execute($request);
+```
+
+When reading all records, if an error occurs during any page request, the operation stops and returns the error. To continue reading despite errors (skipping failed pages), use `setSkipErrorRequests()`:
+
+```php
+$request = RequestFactory::buildReadRequest("CampaignsRecords")
+    ->setRequestType(ReadRequest::TYPE_ALL)
+    ->setSkipErrorRequests(true);
 $response = $client->execute($request);
 ```
 
@@ -125,6 +155,20 @@ $request = RequestFactory::buildReadRequest("CampaignsRecords")
             ["action", "eq", "0"]
         ])
     ->addSort("created", "asc");
+$response = $client->execute($request);
+```
+
+By default, multiple filters are combined with AND logic. To use OR logic, specify it in the filter array:
+
+```php
+$request = RequestFactory::buildReadRequest("Users")
+    ->addFilterFromArray([
+        'logic' => 'or',
+        'filters' => [
+            ["field" => "username", "operator" => "eq", "value" => "admin"],
+            ["field" => "username", "operator" => "eq", "value" => "supervisor"]
+        ]
+    ]);
 $response = $client->execute($request);
 ```
 

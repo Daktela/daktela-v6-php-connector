@@ -42,7 +42,7 @@ class ApiRequestTest extends TestCase
         $response = $client->execute($request);
         self::assertNotNull($response->getData());
         self::assertEquals(201, $response->getHttpStatus());
-        self::assertObjectHasAttribute('name', $response->getData());
+        self::assertTrue(property_exists($response->getData(), 'name'));
         self::assertEquals("test_create_" . $this->hash, $response->getData()->name);
         self::assertEmpty($response->getErrors());
         self::assertEquals(1, $response->getTotal());
@@ -70,7 +70,7 @@ class ApiRequestTest extends TestCase
         self::assertEquals(200, $responseRead->getHttpStatus());
         self::assertGreaterThan(0, $responseRead->getData());
         self::assertArrayHasKey(0, $responseRead->getData());
-        self::assertObjectHasAttribute("name", $responseRead->getData()[0]);
+        self::assertTrue(property_exists($responseRead->getData()[0], 'name'));
         self::assertEquals("test_read1_" . $this->hash, $responseRead->getData()[0]->name);
     }
 
@@ -96,7 +96,7 @@ class ApiRequestTest extends TestCase
         self::assertEquals(200, $responseRead->getHttpStatus());
         self::assertGreaterThan(0, $responseRead->getData());
         self::assertArrayHasKey(0, $responseRead->getData());
-        self::assertObjectHasAttribute("name", $responseRead->getData()[0]);
+        self::assertTrue(property_exists($responseRead->getData()[0], 'name'));
         self::assertEquals("test_read3_" . $this->hash, $responseRead->getData()[0]->name);
     }
 
@@ -120,7 +120,7 @@ class ApiRequestTest extends TestCase
         self::assertEmpty($responseRead->getErrors());
         self::assertEquals(200, $responseRead->getHttpStatus());
         self::assertEquals(1, $responseRead->getTotal());
-        self::assertObjectHasAttribute("name", $responseRead->getData());
+        self::assertTrue(property_exists($responseRead->getData(), 'name'));
         self::assertEquals("test_read2_" . $this->hash, $responseRead->getData()->name);
     }
 
@@ -141,7 +141,7 @@ class ApiRequestTest extends TestCase
         $response = $client->execute($request);
         self::assertNotNull($response->getData());
         self::assertEquals(200, $response->getHttpStatus());
-        self::assertObjectHasAttribute('name', $response->getData());
+        self::assertTrue(property_exists($response->getData(), 'name'));
         self::assertEquals("test_update_" . $this->hash, $response->getData()->name);
         self::assertEmpty($response->getErrors());
         self::assertEquals(1, $response->getTotal());
@@ -186,7 +186,7 @@ class ApiRequestTest extends TestCase
     self::assertNotEmpty($responseRead->getData());
     self::assertEmpty($responseRead->getErrors());
     self::assertTrue($responseRead->getTotal() > 0);
-    self::assertObjectHasAttribute("name", $responseRead->getData()[0]);
+    self::assertTrue(property_exists($responseRead->getData()[0], 'name'));
     self::assertEquals("test_single_filter_array_" . $this->hash, $responseRead->getData()[0]->name);
   }
 }

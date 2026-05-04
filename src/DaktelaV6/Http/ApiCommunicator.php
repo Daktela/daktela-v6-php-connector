@@ -6,7 +6,6 @@ namespace Daktela\DaktelaV6\Http;
 
 use Daktela\DaktelaV6\Exception\RateLimitException;
 use Daktela\DaktelaV6\Exception\RequestException;
-use Daktela\DaktelaV6\Log\NullLogger;
 use Daktela\DaktelaV6\Response\Response;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
@@ -48,8 +47,8 @@ class ApiCommunicator
     private bool $verifySsl = true;
     /** @var string|null Custom User-Agent suffix to append */
     private ?string $userAgentSuffix = null;
-    /** @var LoggerInterface Logger for debugging API calls */
-    private LoggerInterface $logger;
+    /** @var LoggerInterface|null Logger for debugging API calls */
+    private ?LoggerInterface $logger = null;
     /** @var ClientInterface|null Custom HTTP client for requests */
     private ?ClientInterface $httpClient = null;
     /** @var RetryConfig|null Retry configuration */
@@ -66,7 +65,6 @@ class ApiCommunicator
     {
         $this->baseUrl = $baseUrl;
         $this->accessToken = $accessToken;
-        $this->logger = new NullLogger();
     }
 
     /**
@@ -110,7 +108,7 @@ class ApiCommunicator
             // Apply delay for retries (not on first attempt)
             if ($attempt > 0) {
                 $delayMs = $this->retryConfig->getDelayForAttempt($attempt - 1);
-                $this->logger->info('Retrying request', [
+                $this->logger?->info('Retrying request', [
                     'attempt' => $attempt + 1,
                     'delay_ms' => $delayMs,
                     'endpoint' => $apiEndpoint,
@@ -118,7 +116,7 @@ class ApiCommunicator
                 usleep($delayMs * 1000);
             }
 
-            $this->logger->debug('Sending API request', [
+            $this->logger?->debug('Sending API request', [
                 'method' => $method,
                 'endpoint' => $apiEndpoint,
                 'has_body' => !is_null($data),
@@ -145,7 +143,7 @@ class ApiCommunicator
                     && $attempt < $maxAttempts - 1
                     && $this->retryConfig->isRetryableStatus($statusCode)
                 ) {
-                    $this->logger->warning('Retryable status code received', [
+                    $this->logger?->warning('Retryable status code received', [
                         'status' => $statusCode,
                         'endpoint' => $apiEndpoint,
                     ]);
@@ -156,7 +154,7 @@ class ApiCommunicator
 
             } catch (ConnectException $ex) {
                 $lastException = $ex;
-                $this->logger->warning('Connection error', [
+                $this->logger?->warning('Connection error', [
                     'endpoint' => $apiEndpoint,
                     'error' => $ex->getMessage(),
                 ]);
@@ -175,7 +173,7 @@ class ApiCommunicator
                 // Will retry on next iteration
 
             } catch (GuzzleException $ex) {
-                $this->logger->error('API request failed', [
+                $this->logger?->error('API request failed', [
                     'method' => $method,
                     'endpoint' => $apiEndpoint,
                     'error' => $ex->getMessage(),
@@ -208,7 +206,7 @@ class ApiCommunicator
         $waitSeconds = $this->rateLimitConfig?->parseRetryAfter($retryAfterHeader)
             ?? ($this->rateLimitConfig?->getDefaultWaitSeconds() ?? 5);
 
-        $this->logger->warning('Rate limit hit', [
+        $this->logger?->warning('Rate limit hit', [
             'endpoint' => $endpoint,
             'retry_after_seconds' => $waitSeconds,
         ]);
@@ -220,7 +218,7 @@ class ApiCommunicator
 
         // If wait time exceeds maximum, throw exception
         if ($waitSeconds > $this->rateLimitConfig->getMaxWaitSeconds()) {
-            $this->logger->error('Rate limit wait time exceeds maximum', [
+            $this->logger?->error('Rate limit wait time exceeds maximum', [
                 'wait_seconds' => $waitSeconds,
                 'max_wait_seconds' => $this->rateLimitConfig->getMaxWaitSeconds(),
             ]);
@@ -228,7 +226,7 @@ class ApiCommunicator
         }
 
         // Wait and signal to retry
-        $this->logger->info('Waiting for rate limit reset', ['seconds' => $waitSeconds]);
+        $this->logger?->info('Waiting for rate limit reset', ['seconds' => $waitSeconds]);
         sleep($waitSeconds);
         return null;
     }
@@ -280,7 +278,7 @@ class ApiCommunicator
             try {
                 $responseBody = Utils::jsonDecode($responseBody);
             } catch (InvalidArgumentException $ex) {
-                $this->logger->error('Failed to parse API response', [
+                $this->logger?->error('Failed to parse API response', [
                     'error' => $ex->getMessage(),
                 ]);
                 throw new RequestException($ex->getMessage(), $ex->getCode(), $ex);
@@ -288,7 +286,7 @@ class ApiCommunicator
         }
 
         if (!isset($responseBody->result)) {
-            $this->logger->debug('API response received (no result)', [
+            $this->logger?->debug('API response received (no result)', [
                 'status' => $httpResponse->getStatusCode(),
             ]);
             return new Response(null, 0, [], $httpResponse->getStatusCode());
@@ -298,7 +296,7 @@ class ApiCommunicator
         $total = $responseBody->result->total ?? 1;
         $errors = !isset($responseBody->error) ? [] : $responseBody->error;
 
-        $this->logger->debug('API response received', [
+        $this->logger?->debug('API response received', [
             'status' => $httpResponse->getStatusCode(),
             'total' => $total,
             'has_errors' => !empty($errors),

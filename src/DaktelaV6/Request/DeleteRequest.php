@@ -7,7 +7,7 @@ namespace Daktela\DaktelaV6\Request;
 class DeleteRequest extends ARequest
 {
     /** @var string Unique object name that is supposed to be deleted */
-    private $objectName;
+    private $objectName = '';
 
     /**
      * Method for setting the object name to be deleted.

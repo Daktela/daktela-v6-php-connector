@@ -10,9 +10,12 @@ use Daktela\DaktelaV6\Http\ApiCommunicator;
 use Daktela\DaktelaV6\Http\RateLimitConfig;
 use Daktela\DaktelaV6\Http\RetryConfig;
 use GuzzleHttp\Client;
+use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Exception\RequestException as GuzzleRequestException;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use PHPUnit\Framework\TestCase;
@@ -20,10 +23,22 @@ use Psr\Log\LoggerInterface;
 
 class ApiCommunicatorTest extends TestCase
 {
-    private function createMockClient(array $responses): Client
+    private function getPrivateProperty(object $object, string $name): mixed
+    {
+        $property = new \ReflectionProperty($object, $name);
+        if (PHP_VERSION_ID < 80100) {
+            $property->setAccessible(true);
+        }
+        return $property->getValue($object);
+    }
+
+    private function createMockClient(array $responses, ?array &$history = null): Client
     {
         $mock = new MockHandler($responses);
         $handlerStack = HandlerStack::create($mock);
+        if ($history !== null) {
+            $handlerStack->push(Middleware::history($history));
+        }
         return new Client(['handler' => $handlerStack]);
     }
 
@@ -129,8 +144,25 @@ class ApiCommunicatorTest extends TestCase
         $communicator = new ApiCommunicator('https://example.com', 'token');
         $communicator->setRequestTimeout(30.0);
 
-        // No direct way to verify, but should not throw
-        $this->assertTrue(true);
+        $this->assertSame(30.0, $this->getPrivateProperty($communicator, 'requestTimeout'));
+    }
+
+    public function testDefaultClientUsesConfiguredTransportOptions(): void
+    {
+        $communicator = new ApiCommunicator('example.com/', 'token');
+        $communicator->setRequestTimeout(12.5);
+        $communicator->setVerifySsl(false);
+        $method = new \ReflectionMethod($communicator, 'createDefaultClient');
+        if (PHP_VERSION_ID < 80100) {
+            $method->setAccessible(true);
+        }
+
+        /** @var Client $client */
+        $client = $method->invoke($communicator);
+
+        $this->assertSame('https://example.com', (string)$client->getConfig('base_uri'));
+        $this->assertSame(12.5, $client->getConfig('timeout'));
+        $this->assertFalse($client->getConfig('verify'));
     }
 
     public function testSetAuthenticationMethodHeader(): void
@@ -138,8 +170,10 @@ class ApiCommunicatorTest extends TestCase
         $communicator = new ApiCommunicator('https://example.com', 'token');
         $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_HEADER);
 
-        // No direct way to verify, but should not throw
-        $this->assertTrue(true);
+        $this->assertSame(
+            ApiCommunicator::AUTHENTICATION_METHOD_HEADER,
+            $this->getPrivateProperty($communicator, 'authenticationMethod')
+        );
     }
 
     public function testSetAuthenticationMethodQuery(): void
@@ -147,8 +181,10 @@ class ApiCommunicatorTest extends TestCase
         $communicator = new ApiCommunicator('https://example.com', 'token');
         $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_QUERY);
 
-        // No direct way to verify, but should not throw
-        $this->assertTrue(true);
+        $this->assertSame(
+            ApiCommunicator::AUTHENTICATION_METHOD_QUERY,
+            $this->getPrivateProperty($communicator, 'authenticationMethod')
+        );
     }
 
     public function testSetAuthenticationMethodInvalid(): void
@@ -227,8 +263,11 @@ class ApiCommunicatorTest extends TestCase
         $this->assertEquals(0, $response->getTotal());
     }
 
-    public function testSendRequestWithErrors(): void
+    public function testSendRequestPreservesExceptionForNonRetryableHttpErrors(): void
     {
+        $this->expectException(RequestException::class);
+        $this->expectExceptionMessage('400 Bad Request');
+
         $mockClient = $this->createMockClient([
             new GuzzleResponse(400, [], json_encode([
                 'result' => ['data' => null],
@@ -239,10 +278,25 @@ class ApiCommunicatorTest extends TestCase
         $communicator = new ApiCommunicator('https://example.com', 'token');
         $communicator->setHttpClient($mockClient);
 
+        $communicator->sendRequest('GET', 'Users');
+    }
+
+    public function testSendRequestParsesErrorsFromSuccessfulApiResponse(): void
+    {
+        $mockClient = $this->createMockClient([
+            new GuzzleResponse(200, [], json_encode([
+                'result' => ['data' => null],
+                'error' => ['Invalid request'],
+            ])),
+        ]);
+
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($mockClient);
+
         $response = $communicator->sendRequest('GET', 'Users');
 
-        $this->assertEquals(400, $response->getHttpStatus());
-        $this->assertEquals(['Invalid request'], $response->getErrors());
+        $this->assertSame(['Invalid request'], $response->getErrors());
+        $this->assertTrue($response->hasErrors());
     }
 
     public function testSendRequestRetryOnConnectionError(): void
@@ -278,6 +332,28 @@ class ApiCommunicatorTest extends TestCase
         $communicator->sendRequest('GET', 'Users');
     }
 
+    public function testSendRequestWrapsOtherGuzzleExceptions(): void
+    {
+        $guzzleException = new GuzzleRequestException(
+            'Transport failed',
+            new Request('GET', 'https://example.com')
+        );
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->expects($this->once())
+            ->method('send')
+            ->willThrowException($guzzleException);
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected the transport exception to be wrapped');
+        } catch (RequestException $exception) {
+            $this->assertSame('Transport failed', $exception->getMessage());
+            $this->assertSame($guzzleException, $exception->getPrevious());
+        }
+    }
+
     public function testSendRequestRetryOnServerError(): void
     {
         $mockClient = $this->createMockClient([
@@ -307,6 +383,159 @@ class ApiCommunicatorTest extends TestCase
         $communicator = new ApiCommunicator('https://example.com', 'token');
         $communicator->setHttpClient($mockClient);
 
+        $communicator->sendRequest('GET', 'Users');
+    }
+
+    public function testSendRequestAutomaticallyRetriesRateLimitWithoutRetryConfig(): void
+    {
+        $mockClient = $this->createMockClient([
+            new GuzzleResponse(429, ['Retry-After' => '0'], ''),
+            new GuzzleResponse(200, [], json_encode([
+                'result' => ['data' => [['id' => 1]], 'total' => 1],
+            ])),
+        ]);
+
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($mockClient);
+        $communicator->setRateLimitConfig(new RateLimitConfig(defaultWaitSeconds: 0));
+
+        $response = $communicator->sendRequest('GET', 'Users');
+
+        $this->assertTrue($response->isSuccess());
+        $this->assertSame(1, $response->getTotal());
+    }
+
+    public function testSendRequestRateLimitThrowsWhenAutoRetryDisabled(): void
+    {
+        $mockClient = $this->createMockClient([
+            new GuzzleResponse(429, ['Retry-After' => '7'], ''),
+        ]);
+
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($mockClient);
+        $communicator->setRateLimitConfig(new RateLimitConfig(autoRetry: false));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected a rate-limit exception');
+        } catch (RateLimitException $exception) {
+            $this->assertSame(7, $exception->getRetryAfterSeconds());
+        }
+    }
+
+    public function testSendRequestRateLimitThrowsWhenWaitExceedsMaximum(): void
+    {
+        $mockClient = $this->createMockClient([
+            new GuzzleResponse(429, ['Retry-After' => '2'], ''),
+        ]);
+
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($mockClient);
+        $communicator->setRateLimitConfig(new RateLimitConfig(maxWaitSeconds: 1));
+
+        $this->expectException(RateLimitException::class);
+        $communicator->sendRequest('GET', 'Users');
+    }
+
+    public function testSendRequestStopsAfterAvailableRateLimitRetry(): void
+    {
+        $mockClient = $this->createMockClient([
+            new GuzzleResponse(429, ['Retry-After' => '0'], ''),
+            new GuzzleResponse(429, ['Retry-After' => '0'], ''),
+        ]);
+
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($mockClient);
+        $communicator->setRateLimitConfig(new RateLimitConfig(defaultWaitSeconds: 0));
+
+        $this->expectException(RateLimitException::class);
+        $communicator->sendRequest('GET', 'Users');
+    }
+
+    public function testBuildsHeaderAuthenticatedJsonRequest(): void
+    {
+        $history = [];
+        $mockClient = $this->createMockClient([
+            new GuzzleResponse(200, [], json_encode(['result' => ['data' => null]])),
+        ], $history);
+
+        $communicator = new ApiCommunicator('https://example.com', 'secret-token');
+        $communicator->setUserAgentSuffix('Example/1.0');
+        $communicator->setHttpClient($mockClient);
+        $communicator->sendRequest('POST', 'Users', ['take' => 5], ['name' => 'Alice']);
+
+        $request = $history[0]['request'];
+        $this->assertSame('POST', $request->getMethod());
+        $this->assertSame('/api/v6/users.json', $request->getUri()->getPath());
+        $this->assertSame('take=5', $request->getUri()->getQuery());
+        $this->assertSame('secret-token', $request->getHeaderLine('X-AUTH-TOKEN'));
+        $this->assertSame(
+            'daktela-v6-php-connector Example/1.0',
+            $request->getHeaderLine('User-Agent')
+        );
+        $this->assertSame('application/json', $request->getHeaderLine('Content-Type'));
+        $this->assertSame('{"name":"Alice"}', (string)$request->getBody());
+    }
+
+    public function testBuildsQueryAuthenticatedRequest(): void
+    {
+        $history = [];
+        $mockClient = $this->createMockClient([
+            new GuzzleResponse(200, [], json_encode(['result' => ['data' => null]])),
+        ], $history);
+
+        $communicator = new ApiCommunicator('https://example.com', 'secret-token');
+        $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_QUERY);
+        $communicator->setHttpClient($mockClient);
+        $communicator->sendRequest('GET', 'Users', ['take' => 5]);
+
+        $request = $history[0]['request'];
+        parse_str($request->getUri()->getQuery(), $query);
+        $this->assertSame(['take' => '5', 'accessToken' => 'secret-token'], $query);
+        $this->assertFalse($request->hasHeader('X-AUTH-TOKEN'));
+    }
+
+    public function testSendRequestRejectsInvalidJson(): void
+    {
+        $mockClient = $this->createMockClient([
+            new GuzzleResponse(200, [], '{invalid-json'),
+        ]);
+
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($mockClient);
+
+        $this->expectException(RequestException::class);
+        $communicator->sendRequest('GET', 'Users');
+    }
+
+    public function testSendRequestThrowsAfterConnectionRetriesAreExhausted(): void
+    {
+        $mockClient = $this->createMockClient([
+            new ConnectException('First failure', new Request('GET', '/')),
+            new ConnectException('Second failure', new Request('GET', '/')),
+        ]);
+
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($mockClient);
+        $communicator->setRetryConfig(new RetryConfig(maxRetries: 1, baseDelayMs: 0));
+
+        $this->expectException(RequestException::class);
+        $this->expectExceptionMessage('Max retries exceeded: Second failure');
+        $communicator->sendRequest('GET', 'Users');
+    }
+
+    public function testSendRequestDoesNotRetryConnectionWhenDisabled(): void
+    {
+        $mockClient = $this->createMockClient([
+            new ConnectException('Connection failed', new Request('GET', '/')),
+        ]);
+
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($mockClient);
+        $communicator->setRetryConfig(new RetryConfig(retryOnConnectionError: false));
+
+        $this->expectException(RequestException::class);
+        $this->expectExceptionMessage('Connection failed');
         $communicator->sendRequest('GET', 'Users');
     }
 

@@ -9,6 +9,7 @@ use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Response\Response;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
+use GuzzleHttp\Exception\BadResponseException;
 use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\InvalidArgumentException;
@@ -101,12 +102,16 @@ class ApiCommunicator
         $client = $this->httpClient ?? $this->createDefaultClient();
         $request = $this->buildRequest($method, $apiEndpoint, $queryParams, $data);
 
-        $maxAttempts = 1 + ($this->retryConfig?->getMaxRetries() ?? 0);
+        $retryCount = $this->retryConfig?->getMaxRetries() ?? 0;
+        $rateLimitRetryCount = $this->rateLimitConfig?->shouldAutoRetry() ? max(1, $retryCount) : 0;
+        $maxAttempts = 1 + max($retryCount, $rateLimitRetryCount);
         $lastException = null;
+        $applyRetryDelay = false;
 
         for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
-            // Apply delay for retries (not on first attempt)
-            if ($attempt > 0) {
+            // Apply exponential backoff for transport/status retries. Rate-limit
+            // retries already wait according to Retry-After and must not wait twice.
+            if ($applyRetryDelay && $this->retryConfig !== null) {
                 $delayMs = $this->retryConfig->getDelayForAttempt($attempt - 1);
                 $this->logger?->info('Retrying request', [
                     'attempt' => $attempt + 1,
@@ -115,6 +120,7 @@ class ApiCommunicator
                 ]);
                 usleep($delayMs * 1000);
             }
+            $applyRetryDelay = false;
 
             $this->logger?->debug('Sending API request', [
                 'method' => $method,
@@ -123,35 +129,15 @@ class ApiCommunicator
                 'attempt' => $attempt + 1,
             ]);
 
+            $httpException = null;
             try {
                 $httpResponse = $client->send($request);
-                $statusCode = $httpResponse->getStatusCode();
-
-                // Handle rate limiting (429)
-                if ($statusCode === 429) {
-                    $response = $this->handleRateLimit($httpResponse, $method, $apiEndpoint);
-                    if ($response === null) {
-                        // Rate limit handled, retry
-                        continue;
-                    }
-                    // Rate limit exception thrown or returned response
-                    return $response;
-                }
-
-                // Check if we should retry based on status code
-                if ($this->retryConfig !== null
-                    && $attempt < $maxAttempts - 1
-                    && $this->retryConfig->isRetryableStatus($statusCode)
-                ) {
-                    $this->logger?->warning('Retryable status code received', [
-                        'status' => $statusCode,
-                        'endpoint' => $apiEndpoint,
-                    ]);
-                    continue;
-                }
-
-                return $this->parseResponse($httpResponse);
-
+            } catch (BadResponseException $ex) {
+                // Guzzle throws for 4xx/5xx by default. Keep the exception so
+                // non-retryable errors retain their historical behavior, but
+                // inspect its response before deciding whether to retry.
+                $httpException = $ex;
+                $httpResponse = $ex->getResponse();
             } catch (ConnectException $ex) {
                 $lastException = $ex;
                 $this->logger?->warning('Connection error', [
@@ -170,7 +156,8 @@ class ApiCommunicator
                         $ex
                     );
                 }
-                // Will retry on next iteration
+                $applyRetryDelay = true;
+                continue;
 
             } catch (GuzzleException $ex) {
                 $this->logger?->error('API request failed', [
@@ -181,6 +168,46 @@ class ApiCommunicator
                 ]);
                 throw new RequestException($ex->getMessage(), $ex->getCode(), $ex);
             }
+
+            $statusCode = $httpResponse->getStatusCode();
+
+            if ($statusCode === 429) {
+                $this->handleRateLimit(
+                    $httpResponse,
+                    $apiEndpoint,
+                    $attempt < $maxAttempts - 1
+                );
+                continue;
+            }
+
+            if ($this->retryConfig !== null
+                && $attempt < $maxAttempts - 1
+                && $this->retryConfig->isRetryableStatus($statusCode)
+            ) {
+                $lastException = $httpException;
+                $this->logger?->warning('Retryable status code received', [
+                    'status' => $statusCode,
+                    'endpoint' => $apiEndpoint,
+                ]);
+                $applyRetryDelay = true;
+                continue;
+            }
+
+            if ($httpException !== null) {
+                $this->logger?->error('API request failed', [
+                    'method' => $method,
+                    'endpoint' => $apiEndpoint,
+                    'error' => $httpException->getMessage(),
+                    'code' => $httpException->getCode(),
+                ]);
+                throw new RequestException(
+                    $httpException->getMessage(),
+                    $httpException->getCode(),
+                    $httpException
+                );
+            }
+
+            return $this->parseResponse($httpResponse);
         }
 
         // If we exit the loop without returning, throw exception
@@ -195,13 +222,16 @@ class ApiCommunicator
      * Handle rate limit response (HTTP 429).
      *
      * @param ResponseInterface $response The HTTP response
-     * @param string $method HTTP method
      * @param string $endpoint API endpoint
-     * @return Response|null Response if should not retry, null if should retry
+     * @param bool $canRetry Whether another request attempt is available
+     * @return void
      * @throws RateLimitException If auto-retry is disabled or wait time exceeds maximum
      */
-    private function handleRateLimit(ResponseInterface $response, string $method, string $endpoint): ?Response
-    {
+    private function handleRateLimit(
+        ResponseInterface $response,
+        string $endpoint,
+        bool $canRetry
+    ): void {
         $retryAfterHeader = $response->getHeaderLine('Retry-After') ?: null;
         $waitSeconds = $this->rateLimitConfig?->parseRetryAfter($retryAfterHeader)
             ?? ($this->rateLimitConfig?->getDefaultWaitSeconds() ?? 5);
@@ -212,7 +242,10 @@ class ApiCommunicator
         ]);
 
         // If no rate limit config or auto-retry disabled, throw exception
-        if ($this->rateLimitConfig === null || !$this->rateLimitConfig->shouldAutoRetry()) {
+        if ($this->rateLimitConfig === null
+            || !$this->rateLimitConfig->shouldAutoRetry()
+            || !$canRetry
+        ) {
             throw new RateLimitException($waitSeconds);
         }
 
@@ -228,7 +261,6 @@ class ApiCommunicator
         // Wait and signal to retry
         $this->logger?->info('Waiting for rate limit reset', ['seconds' => $waitSeconds]);
         sleep($waitSeconds);
-        return null;
     }
 
     /**

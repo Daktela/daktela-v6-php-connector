@@ -22,7 +22,7 @@ namespace Daktela\DaktelaV6\Request;
 class UpdateRequest extends ARequestWithAttributes
 {
     /** @var string Unique object name that is supposed to be updated */
-    private $objectName;
+    private $objectName = '';
 
     /**
      * Method for setting the object name to be updated.

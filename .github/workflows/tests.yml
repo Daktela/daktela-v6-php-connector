@@ -1,6 +1,9 @@
 name: Tests
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
     branches:
       - main
@@ -35,3 +38,26 @@ jobs:
 
       - name: Run PHPUnit tests
         run: vendor/bin/phpunit --configuration phpunit.dist.xml
+
+  coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring
+          coverage: xdebug
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Generate unit-test coverage
+        run: vendor/bin/phpunit --configuration phpunit.dist.xml --testsuite Unit --coverage-clover coverage.xml
+
+      - name: Enforce coverage threshold
+        run: php tests/Support/check-coverage.php coverage.xml 90

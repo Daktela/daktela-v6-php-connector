@@ -30,7 +30,7 @@ class PaginatedIteratorTest extends TestCase
         return $client;
     }
 
-    private function createJsonResponse(array $data, int $total = null): GuzzleResponse
+    private function createJsonResponse(array $data, ?int $total = null): GuzzleResponse
     {
         return new GuzzleResponse(200, [], json_encode([
             'result' => [
@@ -114,6 +114,98 @@ class PaginatedIteratorTest extends TestCase
         $items = iterator_to_array($iterator, false);
 
         $this->assertCount(2, $items);
+    }
+
+    public function testRespectsMaxItemsAcrossPages(): void
+    {
+        $client = $this->createMockClient([
+            $this->createJsonResponse([['id' => 1], ['id' => 2]], 4),
+            $this->createJsonResponse([['id' => 3], ['id' => 4]], 4),
+        ]);
+
+        $iterator = new PaginatedIterator(
+            $client,
+            new ReadRequest('Users'),
+            pageSize: 2,
+            maxItems: 3
+        );
+
+        $items = iterator_to_array($iterator, false);
+
+        $this->assertSame([1, 2, 3], array_map(fn($item) => $item->id, $items));
+    }
+
+    public function testZeroMaxItemsDoesNotMakeARequest(): void
+    {
+        $client = $this->createMockClient([]);
+        $iterator = new PaginatedIterator(
+            $client,
+            new ReadRequest('Users'),
+            maxItems: 0
+        );
+
+        $this->assertSame([], iterator_to_array($iterator, false));
+    }
+
+    public function testFallsBackToEmptyPageWhenTotalIsUnavailable(): void
+    {
+        $client = $this->createMockClient([
+            $this->createJsonResponse([['id' => 1], ['id' => 2]], 0),
+            $this->createJsonResponse([], 0),
+        ]);
+        $iterator = new PaginatedIterator($client, new ReadRequest('Users'), pageSize: 2);
+
+        $items = iterator_to_array($iterator, false);
+
+        $this->assertCount(2, $items);
+    }
+
+    public function testStopsOnErrorByDefault(): void
+    {
+        $client = $this->createMockClient([
+            new GuzzleResponse(200, [], json_encode([
+                'result' => ['data' => null, 'total' => 0],
+                'error' => ['Temporary error'],
+            ])),
+        ]);
+        $iterator = new PaginatedIterator($client, new ReadRequest('Users'));
+
+        $this->assertSame([], iterator_to_array($iterator, false));
+    }
+
+    public function testCanSkipErrorPageAndContinue(): void
+    {
+        $client = $this->createMockClient([
+            new GuzzleResponse(200, [], json_encode([
+                'result' => ['data' => null, 'total' => 3],
+                'error' => ['Temporary error'],
+            ])),
+            $this->createJsonResponse([['id' => 3]], 3),
+        ]);
+        $iterator = new PaginatedIterator(
+            $client,
+            new ReadRequest('Users'),
+            pageSize: 2,
+            stopOnError: false
+        );
+
+        $items = iterator_to_array($iterator, false);
+
+        $this->assertCount(1, $items);
+        $this->assertSame(3, $items[0]->id);
+    }
+
+    public function testStopsWhenResponseDataIsNotAnArray(): void
+    {
+        $client = $this->createMockClient([
+            new GuzzleResponse(200, [], json_encode([
+                'result' => ['data' => ['id' => 1], 'total' => 1],
+            ])),
+        ]);
+        $iterator = new PaginatedIterator($client, new ReadRequest('Users'));
+
+        // The API decoder represents this associative object as stdClass.
+        $this->assertSame([], iterator_to_array($iterator, false));
     }
 
     public function testToArray(): void
@@ -222,6 +314,45 @@ class PaginatedIteratorTest extends TestCase
         $this->assertCount(2, $pages);
         $this->assertInstanceOf(Response::class, $pages[0]);
         $this->assertInstanceOf(Response::class, $pages[1]);
+    }
+
+    public function testPagesYieldsErrorBeforeStopping(): void
+    {
+        $client = $this->createMockClient([
+            new GuzzleResponse(200, [], json_encode([
+                'result' => ['data' => null, 'total' => 0],
+                'error' => ['Temporary error'],
+            ])),
+        ]);
+        $iterator = new PaginatedIterator($client, new ReadRequest('Users'));
+
+        $pages = iterator_to_array($iterator->pages(), false);
+
+        $this->assertCount(1, $pages);
+        $this->assertTrue($pages[0]->hasErrors());
+    }
+
+    public function testPagesCanSkipErrorAndContinue(): void
+    {
+        $client = $this->createMockClient([
+            new GuzzleResponse(200, [], json_encode([
+                'result' => ['data' => null, 'total' => 3],
+                'error' => ['Temporary error'],
+            ])),
+            $this->createJsonResponse([['id' => 3]], 3),
+        ]);
+        $iterator = new PaginatedIterator(
+            $client,
+            new ReadRequest('Users'),
+            pageSize: 2,
+            stopOnError: false
+        );
+
+        $pages = iterator_to_array($iterator->pages(), false);
+
+        $this->assertCount(2, $pages);
+        $this->assertTrue($pages[0]->hasErrors());
+        $this->assertSame(3, $pages[1]->getData()[0]->id);
     }
 
     public function testEach(): void

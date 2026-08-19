@@ -233,12 +233,18 @@ class Client
                 return $currentResponse;
             }
 
-            $data = [];
-            if (is_array($currentResponse->getData())) {
-                $data = array_merge($response->getData(), $currentResponse->getData());
-            } elseif (!$request->isSkipErrorRequests()) {
-                return $currentResponse;
+            $currentData = $currentResponse->getData();
+            if (!is_array($currentData)) {
+                if (!$request->isSkipErrorRequests()) {
+                    return $currentResponse;
+                }
+
+                // Skip malformed/error pages as requested. The READ_LIMIT
+                // loop bound prevents an unbounded sequence of skipped pages.
+                continue;
             }
+
+            $data = array_merge($response->getData(), $currentData);
             $response = new Response(
                 $data,
                 $currentResponse->getTotal(),
@@ -247,7 +253,10 @@ class Client
             );
 
             //If returned less than take, it is the last page
-            if (count($currentResponse->getData()) < $request->getTake()) {
+            if (count($currentData) < $request->getTake()
+                || ($currentResponse->getTotal() > 0
+                    && count($data) >= $currentResponse->getTotal())
+            ) {
                 break;
             }
         }

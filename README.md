@@ -4,18 +4,26 @@ Daktela V6 PHP Connector is a library that enables your PHP application to conne
 
 ## Installation
 
-The recommended way to install is through Composer:
+The connector requires PHP 8.0 or newer, the `mbstring` extension, Guzzle 7.15.2 or newer, and PSR-7 2.12.3 or newer. The recommended way to install it is through Composer:
 
 ```bash
-composer require daktela/daktela-v6-php-connector
+composer require daktela/daktela-v6-php-connector:^2.5
 ```
+
+When upgrading an existing installation, Composer may need permission to update transitive dependencies:
+
+```bash
+composer require daktela/daktela-v6-php-connector:^2.5 --with-all-dependencies
+```
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes and upgrade requirements.
 
 ## Setup
 
-The connector requires following prerequisites:
+The connector requires the following:
 
-* Instance URL in the form of https://URL/
-* Access token for each access to the Daktela V6 REST API based on required permissions
+- An instance URL such as `https://mydaktela.daktela.com/`
+- An access token with the permissions required by the Daktela V6 REST API operations you call
 
 ## Configuration
 
@@ -34,8 +42,10 @@ $client->getApiCommunicator()->setRequestTimeout(30.0); // 30 seconds
 
 There are two ways you can use the Daktela V6 PHP Connector:
 
-1. By instantiating the connector instance - useful when calling API with one authentication credentials
-2. Using static access method - useful when switching access tokens and URL
+1. Instantiate the connector directly when using one set of credentials.
+2. Use the static instance accessor when working with multiple instance URL and access-token pairs.
+
+Clients with the same instance URL and access token share the same `ApiCommunicator`, including its timeout, logger, custom HTTP client, retry, and rate-limit settings. Configure those clients consistently.
 
 ### 1. Using instance of the connector
 
@@ -83,8 +93,7 @@ $request = RequestFactory::buildReadRequest("CampaignsRecords")
 $response = $client->execute($request);
 ```
 
-In order to get one specific object for entity use the `RequestFactory::buildbuildReadSingleRequest()` method or use the
-method `setObjectName()` passing the object unique name along with `setRequestType(RequestType::TYPE_SINGLE)`:
+To get one specific object, use `RequestFactory::buildReadSingleRequest()` or set its unique name and the `ReadRequest::TYPE_SINGLE` request type explicitly:
 
 ```php
 $request = RequestFactory::buildReadSingleRequest("CampaignsRecords", "records_5fa299a48ab72834012563");
@@ -95,9 +104,7 @@ $request = RequestFactory::buildReadRequest("CampaignsRecords")
 $response = $client->execute($request);
 ```
 
-If relation data should be read use the `RequestFactory::buildbuildReadRelationRequest()` method or use the
-methods `setObjectName()` and `setRelation()` passing the object unique name and relation name along
-with `setRequestType(RequestType::TYPE_MULTIPLE)`:
+To read relation data, use `RequestFactory::buildReadRelationRequest()` or set the object name, relation name, and `ReadRequest::TYPE_MULTIPLE` request type explicitly:
 
 ```php
 $request = RequestFactory::buildReadRelationRequest("CampaignsRecords", "records_5fa299a48ab72834012563", "activities");
@@ -136,7 +143,7 @@ $request = RequestFactory::buildReadRequest("CampaignsRecords")
 $response = $client->execute($request);
 ```
 
-When reading all records, if an error occurs during any page request, the operation stops and returns the error. To continue reading despite errors (skipping failed pages), use `setSkipErrorRequests()`:
+When reading all records, the connector stops as soon as the API-reported total is reached, even when the last page is full. If the API does not report a total, it stops on a short or empty page. A safety limit caps this operation at 999 page requests. By default, an error page ends the operation and that response is returned. To continue past error pages, use `setSkipErrorRequests(true)`; error responses with non-array data are skipped:
 
 ```php
 $request = RequestFactory::buildReadRequest("CampaignsRecords")
@@ -151,9 +158,9 @@ You can use different methods for defining filters:
 $request = RequestFactory::buildReadRequest("CampaignsRecords")
     ->addFilter("created", "gte", "2020-11-01 00:00:00")
     ->addFilterFromArray([
-            ["field" => "edited", "operator" => "lte", "2020-11-30 23:59:59"],
-            ["action", "eq", "0"]
-        ])
+        ["field" => "edited", "operator" => "lte", "value" => "2020-11-30 23:59:59"],
+        ["action", "eq", "0"]
+    ])
     ->addSort("created", "asc");
 $response = $client->execute($request);
 ```
@@ -177,7 +184,7 @@ $response = $client->execute($request);
 ```php
 $request = RequestFactory::buildCreateRequest("CampaignsRecords")
     ->addStringAttribute("number", "00420226211245")
-    ->addIntAttribute("number", 0)
+    ->addIntAttribute("action", 0)
     ->addAttributes(["queue" => 3000]);
 $response = $client->execute($request);
 ```
@@ -188,7 +195,7 @@ $response = $client->execute($request);
 $request = RequestFactory::buildUpdateRequest("CampaignsRecords")
     ->setObjectName("records_5fa299a48ab72834012563")
     ->addStringAttribute("number", "00420226211245")
-    ->addIntAttribute("number", 0)
+    ->addIntAttribute("action", 0)
     ->addAttributes(["queue" => 3000]);
 $response = $client->execute($request);
 ```
@@ -203,7 +210,7 @@ $response = $client->execute($request);
 
 ## Processing response
 
-The response entity contains the parsed data returned by the REST API.
+The response entity contains the parsed data returned by the REST API. A successful HTTP status can still contain application-level errors, so inspect `hasErrors()` when the operation requires it.
 
 ```php
 $response   =   $client->execute($request);
@@ -215,9 +222,7 @@ $httpStatus =   $response->getHttpStatus();
 
 ## Handling exceptions
 
-In case of a problem with executing the request sent, an exception is usually thrown. All the exceptions are descendants
-of the `\DaktelaV6\Exception\RequestException` class. In case a sub-library throws any exception, this exception is
-caught and rethrown as a child of this library's class.
+Transport failures and, with Guzzle's default `http_errors` setting, non-retryable HTTP 4xx/5xx responses are wrapped in `Daktela\DaktelaV6\Exception\RequestException`. HTTP 429 responses use the more specific `RateLimitException`, which extends `RequestException`.
 
 You can handle the response exception in standard way using the `try-catch` expression:
 
@@ -226,8 +231,8 @@ use Daktela\DaktelaV6\Exception\RequestException;
 
 try {
     $response = $client->execute($request);
-} catch(RequestException $ex) {
-    //Exception handling
+} catch (RequestException $ex) {
+    // Exception handling
 }
 ```
 
@@ -241,8 +246,6 @@ By default, the access token is sent via the `X-AUTH-TOKEN` HTTP header. This is
 
 ```php
 use Daktela\DaktelaV6\Client;
-use Daktela\DaktelaV6\Http\ApiCommunicator;
-
 $client = new Client($instance, $accessToken);
 // Token is automatically sent via X-AUTH-TOKEN header
 ```
@@ -318,9 +321,11 @@ $httpClient = new GuzzleClient([
 $client->getApiCommunicator()->setHttpClient($httpClient);
 ```
 
+When a custom client is set, configure timeouts, TLS verification, `http_errors`, and other transport options on that client. The connector's `setRequestTimeout()` and `setVerifySsl()` settings are used only when it creates the default Guzzle client.
+
 ## Retry Mechanism
 
-The connector supports automatic retries with exponential backoff for transient failures:
+The connector supports automatic retries with exponential backoff for configured HTTP status codes and, optionally, connection errors. `maxRetries` is the number of additional attempts after the initial request. With Guzzle's default `http_errors` setting, other HTTP errors continue to throw `RequestException` without retrying.
 
 ```php
 use Daktela\DaktelaV6\Http\RetryConfig;
@@ -352,6 +357,8 @@ $client->getApiCommunicator()->setRateLimitConfig(new RateLimitConfig(
     defaultWaitSeconds: 5    // Default wait if Retry-After header missing
 ));
 ```
+
+With automatic rate-limit handling enabled, the connector performs one retry even when no general `RetryConfig` is set. A positive `maxRetries` value in `RetryConfig` supplies the shared retry budget. The wait comes from either form of the HTTP `Retry-After` header, or from `defaultWaitSeconds`; a `RateLimitException` is thrown if the budget is exhausted or the requested wait exceeds `maxWaitSeconds`.
 
 If rate limiting occurs and `autoRetry` is disabled, a `RateLimitException` is thrown:
 
@@ -423,6 +430,10 @@ foreach ($iterator->pages() as $response) {
 }
 ```
 
+The iterator clones the request and does not mutate the caller's request. It stops at the API-reported total, avoiding an extra empty request when the total is an exact multiple of the page size. If no positive total is reported, it stops on a short or empty page. Set `stopOnError: false` to skip an error page and continue at the next offset. For item iteration, a `maxItems` value of zero returns no items and sends no request; `pages()` is independent of that item limit.
+
+Iterator helper methods start a new traversal each time. For example, calling `first()` and then `toArray()` performs separate API reads.
+
 ## Response Helper Methods
 
 The response object provides convenient helper methods:
@@ -444,3 +455,21 @@ if ($response->hasErrors()) {
 if ($response->isEmpty()) {
     echo "No records found";
 }
+```
+
+## Development and testing
+
+Project commands are run in Docker. After installing dependencies in the mounted working directory, run the deterministic unit suite with:
+
+```bash
+docker run --rm -v "$PWD:/app" -w /app --entrypoint php composer:2 \
+    vendor/bin/phpunit --configuration phpunit.dist.xml --testsuite Unit
+```
+
+The full suite also contains live API integration tests. They are skipped unless all three environment variables are present:
+
+- `INSTANCE`
+- `ACCESS_TOKEN`
+- `RECORD_TYPE`
+
+CI tests supported PHP versions and enforces at least 90% line coverage for the deterministic unit suite.

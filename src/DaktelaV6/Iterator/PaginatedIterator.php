@@ -69,6 +69,10 @@ class PaginatedIterator implements IteratorAggregate
         $offset = 0;
         $itemCount = 0;
 
+        if ($this->maxItems !== null && $this->maxItems <= 0) {
+            return;
+        }
+
         while (true) {
             // Clone to avoid modifying the base request
             $request = clone $this->baseRequest;
@@ -101,8 +105,7 @@ class PaginatedIterator implements IteratorAggregate
                 }
             }
 
-            // If we got less than page size, we've reached the end
-            if (count($data) < $this->pageSize) {
+            if ($this->isLastPage($response, $offset, count($data))) {
                 return;
             }
 
@@ -141,12 +144,29 @@ class PaginatedIterator implements IteratorAggregate
             }
 
             $data = $response->getData();
-            if (!is_array($data) || count($data) < $this->pageSize) {
+            if (!is_array($data)
+                || $this->isLastPage($response, $offset, count($data))
+            ) {
                 return;
             }
 
             $offset += $this->pageSize;
         }
+    }
+
+    /**
+     * Determine whether a page is the final one using both its size and the
+     * API's total count. The total check avoids an unnecessary empty request
+     * when the result count is an exact multiple of the page size.
+     */
+    private function isLastPage(Response $response, int $offset, int $itemCount): bool
+    {
+        if ($itemCount < $this->pageSize) {
+            return true;
+        }
+
+        $total = $response->getTotal();
+        return $total > 0 && ($offset + $itemCount) >= $total;
     }
 
     /**

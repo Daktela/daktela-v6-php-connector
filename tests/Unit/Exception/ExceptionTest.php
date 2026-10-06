@@ -116,4 +116,31 @@ class ExceptionTest extends TestCase
 
         $this->assertSame($previous, $exception->getPrevious());
     }
+
+    public function testRequestExceptionExposesHttpDetails(): void
+    {
+        $exception = new RequestException('Bad', 400, null, 400, '{"error":["x"]}', ['x']);
+
+        $this->assertSame(400, $exception->getHttpStatus());
+        $this->assertSame('{"error":["x"]}', $exception->getResponseBody());
+        $this->assertSame(['x'], $exception->getApiErrors());
+    }
+
+    public function testRequestExceptionDetailsDefaultToEmpty(): void
+    {
+        $exception = new RequestException('Bad');
+
+        $this->assertNull($exception->getHttpStatus());
+        $this->assertNull($exception->getResponseBody());
+        $this->assertSame([], $exception->getApiErrors());
+    }
+
+    public function testNotFoundExceptionCarriesHttpDetails(): void
+    {
+        $exception = new NotFoundException('Missing', null, '{}', ['Not found']);
+
+        $this->assertSame(404, $exception->getCode());
+        $this->assertSame(404, $exception->getHttpStatus());
+        $this->assertSame(['Not found'], $exception->getApiErrors());
+    }
 }

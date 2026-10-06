@@ -94,4 +94,9 @@ class ARequestTest extends TestCase
         $params = $request->getAdditionalQueryParameters();
         $this->assertEquals(['key' => 'value2'], $params);
     }
+
+    public function testGetResponseIsNullBeforeExecution(): void
+    {
+        $this->assertNull((new ReadRequest('Users'))->getResponse());
+    }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Daktela\DaktelaV6\Http;
 
+use Daktela\DaktelaV6\Exception\NotFoundException;
 use Daktela\DaktelaV6\Exception\RateLimitException;
 use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Response\Response;
@@ -34,6 +35,10 @@ class ApiCommunicator
     private const API_NAMESPACE = "/api/v6/";
     /** @var string Constant defining the User-Agent of the HTTP requests */
     private const USER_AGENT = "daktela-v6-php-connector";
+    /** @var string[] HTTP methods that can be repeated without changing the result */
+    private const IDEMPOTENT_METHODS = ['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'];
+    /** @var int[] cURL error numbers raised before the request is sent (resolve/connect/TLS handshake failures) */
+    private const CURL_ERRORS_BEFORE_SEND = [5, 6, 7, 35];
     /** @var array static variable containing all singleton instances of the transport class */
     private static $singletons = [];
     /** @var string URL of the Daktela instance */
@@ -76,7 +81,7 @@ class ApiCommunicator
      */
     public static function getInstance(string $baseUrl, string $accessToken): self
     {
-        $key = md5($baseUrl . $accessToken);
+        $key = hash('sha256', $baseUrl . "\0" . $accessToken);
         if (!isset(self::$singletons[$key])) {
             self::$singletons[$key] = new ApiCommunicator($baseUrl, $accessToken);
         }
@@ -107,6 +112,8 @@ class ApiCommunicator
         $maxAttempts = 1 + max($retryCount, $rateLimitRetryCount);
         $lastException = null;
         $applyRetryDelay = false;
+        $canRetryAfterSend = in_array(strtoupper($method), self::IDEMPOTENT_METHODS, true)
+            || ($this->retryConfig?->shouldRetryNonIdempotentRequests() ?? false);
 
         for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
             // Apply exponential backoff for transport/status retries. Rate-limit
@@ -142,16 +149,21 @@ class ApiCommunicator
                 $lastException = $ex;
                 $this->logger?->warning('Connection error', [
                     'endpoint' => $apiEndpoint,
-                    'error' => $ex->getMessage(),
+                    'error' => $this->redact($ex->getMessage()),
                 ]);
 
-                if ($this->retryConfig === null || !$this->retryConfig->shouldRetryOnConnectionError()) {
-                    throw new RequestException($ex->getMessage(), $ex->getCode(), $ex);
+                // A timeout may happen after the server received the request, so only
+                // idempotent requests (or explicitly allowed ones) are repeated then.
+                if ($this->retryConfig === null
+                    || !$this->retryConfig->shouldRetryOnConnectionError()
+                    || (!$canRetryAfterSend && !$this->failedBeforeSend($ex))
+                ) {
+                    throw new RequestException($this->redact($ex->getMessage()), $ex->getCode(), $ex);
                 }
 
                 if ($attempt >= $maxAttempts - 1) {
                     throw new RequestException(
-                        'Max retries exceeded: ' . $ex->getMessage(),
+                        'Max retries exceeded: ' . $this->redact($ex->getMessage()),
                         $ex->getCode(),
                         $ex
                     );
@@ -163,10 +175,10 @@ class ApiCommunicator
                 $this->logger?->error('API request failed', [
                     'method' => $method,
                     'endpoint' => $apiEndpoint,
-                    'error' => $ex->getMessage(),
+                    'error' => $this->redact($ex->getMessage()),
                     'code' => $ex->getCode(),
                 ]);
-                throw new RequestException($ex->getMessage(), $ex->getCode(), $ex);
+                throw new RequestException($this->redact($ex->getMessage()), $ex->getCode(), $ex);
             }
 
             $statusCode = $httpResponse->getStatusCode();
@@ -181,6 +193,7 @@ class ApiCommunicator
             }
 
             if ($this->retryConfig !== null
+                && $canRetryAfterSend
                 && $attempt < $maxAttempts - 1
                 && $this->retryConfig->isRetryableStatus($statusCode)
             ) {
@@ -197,14 +210,10 @@ class ApiCommunicator
                 $this->logger?->error('API request failed', [
                     'method' => $method,
                     'endpoint' => $apiEndpoint,
-                    'error' => $httpException->getMessage(),
+                    'error' => $this->redact($httpException->getMessage()),
                     'code' => $httpException->getCode(),
                 ]);
-                throw new RequestException(
-                    $httpException->getMessage(),
-                    $httpException->getCode(),
-                    $httpException
-                );
+                throw $this->createHttpException($httpException, $httpResponse);
             }
 
             return $this->parseResponse($httpResponse);
@@ -212,9 +221,80 @@ class ApiCommunicator
 
         // If we exit the loop without returning, throw exception
         throw new RequestException(
-            'Max retries exceeded: ' . ($lastException?->getMessage() ?? 'Unknown error'),
+            'Max retries exceeded: ' . $this->redact($lastException?->getMessage() ?? 'Unknown error'),
             $lastException?->getCode() ?? 0,
             $lastException
+        );
+    }
+
+    /**
+     * Checks whether a connection error happened before the request was sent to the server.
+     * @param ConnectException $ex connection exception raised by the HTTP client
+     * @return bool true when repeating the request cannot duplicate a server-side operation
+     */
+    private function failedBeforeSend(ConnectException $ex): bool
+    {
+        $errno = $ex->getHandlerContext()['errno'] ?? null;
+
+        return is_int($errno) && in_array($errno, self::CURL_ERRORS_BEFORE_SEND, true);
+    }
+
+    /**
+     * Converts an HTTP error response into the connector exception carrying the response details.
+     * @param BadResponseException $ex exception raised by the HTTP client
+     * @param ResponseInterface $response failed HTTP response
+     * @return RequestException exception to be thrown
+     */
+    private function createHttpException(BadResponseException $ex, ResponseInterface $response): RequestException
+    {
+        $body = (string)$response->getBody();
+        $decoded = json_decode($body);
+        $apiErrors = is_object($decoded) ? $this->normalizeErrors($decoded->error ?? null) : [];
+        $message = $this->redact($ex->getMessage());
+
+        if ($response->getStatusCode() === 404) {
+            return new NotFoundException($message, $ex, $body, $apiErrors);
+        }
+
+        return new RequestException($message, $ex->getCode(), $ex, $response->getStatusCode(), $body, $apiErrors);
+    }
+
+    /**
+     * Normalizes the `error` member of an API response into an array.
+     * @param mixed $errors decoded `error` member
+     * @return array list or map of errors
+     */
+    private function normalizeErrors(mixed $errors): array
+    {
+        if ($errors === null || $errors === '' || $errors === []) {
+            return [];
+        }
+        if (is_array($errors)) {
+            return $errors;
+        }
+        if (is_object($errors)) {
+            // Only the top level is converted so that list entries keep their decoded shape
+            return get_object_vars($errors);
+        }
+
+        return [$errors];
+    }
+
+    /**
+     * Removes the access token from text that may end up in exceptions or logs.
+     * @param string $text text possibly containing the access token (e.g. a request URL)
+     * @return string text with every form of the access token replaced
+     */
+    private function redact(string $text): string
+    {
+        if ($this->accessToken === '') {
+            return $text;
+        }
+
+        return str_replace(
+            array_unique([$this->accessToken, urlencode($this->accessToken), rawurlencode($this->accessToken)]),
+            '***',
+            $text
         );
     }
 
@@ -290,7 +370,8 @@ class ApiCommunicator
             $headers['X-AUTH-TOKEN'] = $this->accessToken;
         }
 
-        $requestUri = self::API_NAMESPACE . lcfirst($apiEndpoint) . ".json?" . http_build_query($queryParams);
+        $basePath = rtrim((string)parse_url((string)self::normalizeUrl($this->baseUrl), PHP_URL_PATH), '/');
+        $requestUri = $basePath . self::API_NAMESPACE . lcfirst($apiEndpoint) . ".json?" . http_build_query($queryParams);
         $body = $data !== null ? Utils::jsonEncode($data) : null;
 
         return new Request($method, $requestUri, $headers, $body);
@@ -305,7 +386,7 @@ class ApiCommunicator
      */
     private function parseResponse(ResponseInterface $httpResponse): Response
     {
-        $responseBody = $httpResponse->getBody()->getContents();
+        $responseBody = (string)$httpResponse->getBody();
         if (mb_strlen($responseBody)) {
             try {
                 $responseBody = Utils::jsonDecode($responseBody);
@@ -317,16 +398,18 @@ class ApiCommunicator
             }
         }
 
+        $errors = is_object($responseBody) ? $this->normalizeErrors($responseBody->error ?? null) : [];
+
         if (!isset($responseBody->result)) {
             $this->logger?->debug('API response received (no result)', [
                 'status' => $httpResponse->getStatusCode(),
+                'has_errors' => !empty($errors),
             ]);
-            return new Response(null, 0, [], $httpResponse->getStatusCode());
+            return new Response(null, 0, $errors, $httpResponse->getStatusCode());
         }
 
         $responseData = $responseBody->result->data ?? ($responseBody->result ?? null);
-        $total = $responseBody->result->total ?? 1;
-        $errors = !isset($responseBody->error) ? [] : $responseBody->error;
+        $total = (int)($responseBody->result->total ?? 1);
 
         $this->logger?->debug('API response received', [
             'status' => $httpResponse->getStatusCode(),
@@ -486,15 +569,7 @@ class ApiCommunicator
             $response = $this->sendRequest('GET', 'whoim');
             return $response->isSuccess();
         } catch (RequestException $ex) {
-            // Connection errors indicate ping failure
-            if (str_contains($ex->getMessage(), 'cURL error')
-                || str_contains($ex->getMessage(), 'Connection')
-                || str_contains($ex->getMessage(), 'Could not resolve')
-            ) {
-                return false;
-            }
-            // Other errors (auth, etc.) - API is reachable but request failed
-            // Still consider this as "not healthy" for ping purposes
+            // Connection, authentication and API errors all mean the API is not usable
             return false;
         }
     }

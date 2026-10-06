@@ -45,7 +45,14 @@ There are two ways you can use the Daktela V6 PHP Connector:
 1. Instantiate the connector directly when using one set of credentials.
 2. Use the static instance accessor when working with multiple instance URL and access-token pairs.
 
-Clients with the same instance URL and access token share the same `ApiCommunicator`, including its timeout, logger, custom HTTP client, retry, and rate-limit settings. Configure those clients consistently.
+Clients with the same instance URL and access token share the same `ApiCommunicator`, including its timeout, logger, custom HTTP client, retry, and rate-limit settings. Configure those clients consistently, or give a client its own transport:
+
+```php
+use Daktela\DaktelaV6\Client;
+use Daktela\DaktelaV6\Http\ApiCommunicator;
+
+$client = new Client($instance, $accessToken, new ApiCommunicator($instance, $accessToken));
+```
 
 ### 1. Using instance of the connector
 
@@ -143,7 +150,7 @@ $request = RequestFactory::buildReadRequest("CampaignsRecords")
 $response = $client->execute($request);
 ```
 
-When reading all records, the connector stops as soon as the API-reported total is reached, even when the last page is full. If the API does not report a total, it stops on a short or empty page. A safety limit caps this operation at 999 page requests. By default, an error page ends the operation and that response is returned. To continue past error pages, use `setSkipErrorRequests(true)`; error responses with non-array data are skipped:
+When reading all records, the connector starts at the request's `setSkip()` offset and stops as soon as the API-reported total is reached, even when the last page is full. If the API does not report a total, it stops on a short or empty page. A safety limit caps this operation at 999 page requests; when the limit is reached before all records are read, the response contains the records read so far and an error saying the result is truncated. By default, an error page ends the operation and that response is returned. To continue past error pages, use `setSkipErrorRequests(true)`; error responses with non-array data are skipped:
 
 ```php
 $request = RequestFactory::buildReadRequest("CampaignsRecords")
@@ -165,7 +172,7 @@ $request = RequestFactory::buildReadRequest("CampaignsRecords")
 $response = $client->execute($request);
 ```
 
-By default, multiple filters are combined with AND logic. To use OR logic, specify it in the filter array:
+Every `addFilter()` and `addFilterFromArray()` call is combined with the filters added before it using AND logic. To use OR logic, specify it in the filter array. The OR group is kept intact as a nested group when it is combined with other filters:
 
 ```php
 $request = RequestFactory::buildReadRequest("Users")
@@ -189,6 +196,14 @@ $request = RequestFactory::buildCreateRequest("CampaignsRecords")
 $response = $client->execute($request);
 ```
 
+`addAttributes()` skips `null` values so that a partially filled array (for example a database row) does not clear fields by accident. Pass `true` as the second argument to send `null` values, for example to clear a field:
+
+```php
+$request = RequestFactory::buildUpdateRequest("Contacts")
+    ->setObjectName("contact_123")
+    ->addAttributes(["title" => null], true);
+```
+
 ### Updating entities
 
 ```php
@@ -208,6 +223,8 @@ $request = RequestFactory::buildDeleteRequest("CampaignsRecords")
 $response = $client->execute($request);
 ```
 
+Object names and relation names are URL-encoded as single path segments, so a value such as `a/b` is sent as `a%2Fb` and cannot address a different endpoint. The dot segments `.` and `..` are rejected with a `RequestException`.
+
 ## Processing response
 
 The response entity contains the parsed data returned by the REST API. A successful HTTP status can still contain application-level errors, so inspect `hasErrors()` when the operation requires it.
@@ -224,17 +241,24 @@ $httpStatus =   $response->getHttpStatus();
 
 Transport failures and, with Guzzle's default `http_errors` setting, non-retryable HTTP 4xx/5xx responses are wrapped in `Daktela\DaktelaV6\Exception\RequestException`. HTTP 429 responses use the more specific `RateLimitException`, which extends `RequestException`.
 
-You can handle the response exception in standard way using the `try-catch` expression:
+HTTP 404 responses throw `NotFoundException`, which also extends `RequestException`. For HTTP errors, the exception exposes the response details:
 
 ```php
+use Daktela\DaktelaV6\Exception\NotFoundException;
 use Daktela\DaktelaV6\Exception\RequestException;
 
 try {
     $response = $client->execute($request);
+} catch (NotFoundException $ex) {
+    // The object does not exist
 } catch (RequestException $ex) {
-    // Exception handling
+    $status = $ex->getHttpStatus();     // e.g. 400, or null for transport failures
+    $errors = $ex->getApiErrors();      // the `error` member of the API response
+    $body = $ex->getResponseBody();     // raw response body
 }
 ```
+
+The access token is replaced with `***` in exception messages and log entries produced by the connector. With query parameter authentication, the previous Guzzle exception (`$ex->getPrevious()`) still holds the original request URL, so do not log it.
 
 ## Authentication Methods
 
@@ -327,6 +351,8 @@ When a custom client is set, configure timeouts, TLS verification, `http_errors`
 
 The connector supports automatic retries with exponential backoff for configured HTTP status codes and, optionally, connection errors. `maxRetries` is the number of additional attempts after the initial request. With Guzzle's default `http_errors` setting, other HTTP errors continue to throw `RequestException` without retrying.
 
+Create requests (`POST`) are not idempotent: a timeout or a 5xx response does not prove that the server did not create the record, so repeating them could create duplicates. They are therefore retried only when the connection could not be established (DNS, connect, or TLS handshake failure) or on HTTP 429. Set `retryNonIdempotentRequests: true` to retry them in all retryable cases. Read, update, and delete requests are retried in all retryable cases.
+
 ```php
 use Daktela\DaktelaV6\Http\RetryConfig;
 
@@ -336,7 +362,8 @@ $client->getApiCommunicator()->setRetryConfig(new RetryConfig(
     maxDelayMs: 10000,       // Maximum delay between retries
     multiplier: 2.0,         // Exponential backoff multiplier
     retryableStatusCodes: [500, 502, 503, 504],
-    retryOnConnectionError: true
+    retryOnConnectionError: true,
+    retryNonIdempotentRequests: false // Do not repeat POST after timeouts/5xx
 ));
 
 // Quick presets
@@ -430,7 +457,21 @@ foreach ($iterator->pages() as $response) {
 }
 ```
 
-The iterator clones the request and does not mutate the caller's request. It stops at the API-reported total, avoiding an extra empty request when the total is an exact multiple of the page size. If no positive total is reported, it stops on a short or empty page. Set `stopOnError: false` to skip an error page and continue at the next offset. For item iteration, a `maxItems` value of zero returns no items and sends no request; `pages()` is independent of that item limit.
+The iterator clones the request and does not mutate the caller's request. It stops at the API-reported total, avoiding an extra empty request when the total is an exact multiple of the page size. If no positive total is reported, it stops on a short or empty page. It starts at the request's `setSkip()` offset.
+
+An error page ends the iteration by default. To tell this apart from the end of the data, check the iterator afterwards:
+
+```php
+$iterator = $client->iterate($request);
+foreach ($iterator as $record) {
+    // ...
+}
+if ($iterator->hasStoppedOnError()) {
+    $errors = $iterator->getErrorResponse()->getErrors();
+}
+```
+
+Set `stopOnError: false` to skip an error page and continue at the next offset. Error pages are skipped only while the API-reported total shows that more records follow; otherwise the iteration stops and the error response is available as above. For item iteration, a `maxItems` value of zero returns no items and sends no request; `pages()` is independent of that item limit.
 
 Iterator helper methods start a new traversal each time. For example, calling `first()` and then `toArray()` performs separate API reads.
 

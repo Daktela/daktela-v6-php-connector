@@ -258,4 +258,79 @@ class ReadRequestTest extends TestCase
         $this->assertCount(1, $request->getSorts());
         $this->assertEquals(['name', 'email'], $request->getFields());
     }
+
+    public function testOrGroupAddedAfterAndFilterIsNested(): void
+    {
+        $request = (new ReadRequest('Users'))
+            ->addFilter('active', 'eq', '1')
+            ->addFilterFromArray([
+                'logic' => 'or',
+                'filters' => [['name', 'eq', 'John'], ['name', 'eq', 'Jane']],
+            ]);
+
+        $this->assertSame([
+            'filters' => [
+                ['field' => 'active', 'operator' => 'eq', 'value' => '1'],
+                [
+                    'logic' => 'or',
+                    'filters' => [
+                        ['field' => 'name', 'operator' => 'eq', 'value' => 'John'],
+                        ['field' => 'name', 'operator' => 'eq', 'value' => 'Jane'],
+                    ],
+                ],
+            ],
+            'logic' => 'and',
+        ], $request->getFilters());
+    }
+
+    public function testFilterAddedAfterOrGroupIsCombinedWithAnd(): void
+    {
+        $request = (new ReadRequest('Users'))
+            ->addFilterFromArray(['logic' => 'or', 'filters' => [['name', 'eq', 'John'], ['name', 'eq', 'Jane']]])
+            ->addFilter('active', 'eq', '1');
+
+        $this->assertSame([
+            'logic' => 'and',
+            'filters' => [
+                [
+                    'logic' => 'or',
+                    'filters' => [
+                        ['field' => 'name', 'operator' => 'eq', 'value' => 'John'],
+                        ['field' => 'name', 'operator' => 'eq', 'value' => 'Jane'],
+                    ],
+                ],
+                ['field' => 'active', 'operator' => 'eq', 'value' => '1'],
+            ],
+        ], $request->getFilters());
+    }
+
+    public function testFlatFilterListWithLogicKeyKeepsLogicOutOfConditions(): void
+    {
+        $request = (new ReadRequest('Users'))->addFilterFromArray([
+            'logic' => 'or',
+            ['name', 'eq', 'John'],
+            ['name', 'eq', 'Jane'],
+        ]);
+
+        $this->assertSame([
+            'filters' => [
+                ['field' => 'name', 'operator' => 'eq', 'value' => 'John'],
+                ['field' => 'name', 'operator' => 'eq', 'value' => 'Jane'],
+            ],
+            'logic' => 'or',
+        ], $request->getFilters());
+    }
+
+    public function testNestedShorthandFiltersAreNormalized(): void
+    {
+        $request = (new ReadRequest('Users'))->addFilterFromArray([
+            ['active', 'eq', '1'],
+            ['logic' => 'or', 'filters' => [['name', 'eq', 'John'], ['name', 'eq', 'Jane']]],
+        ]);
+
+        $this->assertSame(
+            ['field' => 'name', 'operator' => 'eq', 'value' => 'Jane'],
+            $request->getFilters()['filters'][1]['filters'][1]
+        );
+    }
 }

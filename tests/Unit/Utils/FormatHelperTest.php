@@ -44,4 +44,15 @@ class FormatHelperTest extends TestCase
             FormatHelper::getNormalizedPhoneNumber('+421123456789', true, '421', 12)
         );
     }
+
+    public function testStripsCommonSeparators(): void
+    {
+        self::assertSame('00420773794604', FormatHelper::getNormalizedPhoneNumber('+420 (773) 794-604'));
+        self::assertSame('00420773794604', FormatHelper::getNormalizedPhoneNumber('773.794.604'));
+    }
+
+    public function testEmptyNumberStaysEmpty(): void
+    {
+        self::assertSame('', FormatHelper::getNormalizedPhoneNumber(' '));
+    }
 }

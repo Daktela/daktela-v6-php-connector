@@ -104,25 +104,19 @@ class ARequestWithAttributes extends ARequest
 
     /**
      * Adds all attributes from provided array to the request.
+     * Null values are skipped unless $includeNull is true, so that passing a partially filled
+     * array (e.g. a database row) does not clear fields by accident.
      * @param array $attributes array containing all attributes to be added
+     * @param bool $includeNull whether null values should be sent (e.g. to clear a field)
      * @return $this current instance of the create request to be used as builder pattern
      */
-    public function addAttributes(array $attributes): self
+    public function addAttributes(array $attributes, bool $includeNull = false): self
     {
         foreach ($attributes as $key => $value) {
-            if (is_string($value)) {
-                $this->addStringAttribute($key, $value);
-            } elseif (is_int($value)) {
-                $this->addIntAttribute($key, $value);
-            } elseif (is_bool($value)) {
-                $this->addBoolAttribute($key, $value);
-            } elseif (is_array($value)) {
-                $this->addArrayAttribute($key, $value);
-            } elseif (is_float($value)) {
-                $this->addFloatAttribute($key, $value);
-            } elseif (is_double($value)) {
-                $this->addDoubleAttribute($key, $value);
+            if ($value === null && !$includeNull) {
+                continue;
             }
+            $this->addAttribute((string)$key, $value);
         }
 
         return $this;

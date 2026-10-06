@@ -34,13 +34,15 @@ class PaginatedIterator implements IteratorAggregate
     private int $pageSize;
     private ?int $maxItems;
     private bool $stopOnError;
+    private ?Response $errorResponse = null;
 
     /**
      * @param Client $client The Daktela client
      * @param ReadRequest $baseRequest The base request to paginate (will be cloned)
      * @param int $pageSize Number of items per page
      * @param int|null $maxItems Maximum items to return (null for unlimited)
-     * @param bool $stopOnError Whether to stop on first error
+     * @param bool $stopOnError Whether to stop on first error. When false, error pages are skipped
+     *     only while the API-reported total shows that more records follow.
      */
     public function __construct(
         Client $client,
@@ -66,8 +68,9 @@ class PaginatedIterator implements IteratorAggregate
      */
     public function getIterator(): Generator
     {
-        $offset = 0;
+        $offset = $this->baseRequest->getSkip();
         $itemCount = 0;
+        $this->errorResponse = null;
 
         if ($this->maxItems !== null && $this->maxItems <= 0) {
             return;
@@ -81,9 +84,8 @@ class PaginatedIterator implements IteratorAggregate
 
             $response = $this->client->execute($request);
 
-            // Handle errors
             if ($response->hasErrors()) {
-                if ($this->stopOnError) {
+                if (!$this->canSkipErrorPage($response, $offset)) {
                     return;
                 }
                 $offset += $this->pageSize;
@@ -121,8 +123,9 @@ class PaginatedIterator implements IteratorAggregate
      */
     public function pages(): Generator
     {
-        $offset = 0;
+        $offset = $this->baseRequest->getSkip();
         $pageNumber = 0;
+        $this->errorResponse = null;
 
         while (true) {
             $request = clone $this->baseRequest;
@@ -134,9 +137,8 @@ class PaginatedIterator implements IteratorAggregate
             yield $pageNumber => $response;
             $pageNumber++;
 
-            // Handle errors
             if ($response->hasErrors()) {
-                if ($this->stopOnError) {
+                if (!$this->canSkipErrorPage($response, $offset)) {
                     return;
                 }
                 $offset += $this->pageSize;
@@ -152,6 +154,44 @@ class PaginatedIterator implements IteratorAggregate
 
             $offset += $this->pageSize;
         }
+    }
+
+    /**
+     * Decide whether iteration continues after an error page. The error response is recorded
+     * when iteration stops, so that callers can tell an error from the end of the data.
+     * Without a positive total there is no way to know whether more records follow, so an
+     * error page then always ends the iteration instead of requesting pages indefinitely.
+     */
+    private function canSkipErrorPage(Response $response, int $offset): bool
+    {
+        $total = $response->getTotal();
+        if (!$this->stopOnError && $total > 0 && $offset + $this->pageSize < $total) {
+            return true;
+        }
+
+        $this->errorResponse = $response;
+
+        return false;
+    }
+
+    /**
+     * Whether the last iteration ended because of an error page rather than the end of the data.
+     *
+     * @return bool
+     */
+    public function hasStoppedOnError(): bool
+    {
+        return $this->errorResponse !== null;
+    }
+
+    /**
+     * The error response that ended the last iteration, or null when it ended normally.
+     *
+     * @return Response|null
+     */
+    public function getErrorResponse(): ?Response
+    {
+        return $this->errorResponse;
     }
 
     /**

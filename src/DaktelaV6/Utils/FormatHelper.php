@@ -1,5 +1,6 @@
 <?php
 
+declare(strict_types=1);
 
 namespace Daktela\DaktelaV6\Utils;
 
@@ -32,7 +33,10 @@ class FormatHelper
             return null;
         }
 
-        $number = str_replace(" ", "", $number);
+        $number = preg_replace('/[\s\-().\/]/u', '', $number);
+        if ($number === '') {
+            return $number;
+        }
         if (mb_substr($number, 0, mb_strlen($intlPrefix)) == $intlPrefix && mb_strlen($number) >= $intlLength) {
             $number = ($plusSign ? '+' : '00') . $number;
         }

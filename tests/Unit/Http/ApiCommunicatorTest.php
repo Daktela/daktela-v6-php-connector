@@ -816,4 +816,19 @@ class ApiCommunicatorTest extends TestCase
             $this->assertInstanceOf(GuzzleRequestException::class, $ex->getPrevious());
         }
     }
+
+    public function testJsonEscapedTokenIsRedactedFromResponseBody(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'ab/cd');
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(400, [], '{"error":["bad token ab\\/cd"]}'),
+        ]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame(['bad token ***'], $ex->getApiErrors());
+        }
+    }
 }

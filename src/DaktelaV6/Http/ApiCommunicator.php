@@ -306,7 +306,12 @@ class ApiCommunicator
         }
 
         return str_replace(
-            array_unique([$this->accessToken, urlencode($this->accessToken), rawurlencode($this->accessToken)]),
+            array_unique([
+                $this->accessToken,
+                urlencode($this->accessToken),
+                rawurlencode($this->accessToken),
+                substr((string)json_encode($this->accessToken), 1, -1),
+            ]),
             '***',
             $text
         );

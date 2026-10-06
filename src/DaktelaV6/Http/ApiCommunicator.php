@@ -18,6 +18,7 @@ use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Utils;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Log\LoggerInterface;
+use Throwable;
 
 /**
  * Class ApiCommunicator is a transport class of the Daktela V6 communication package and
@@ -158,14 +159,14 @@ class ApiCommunicator
                     || !$this->retryConfig->shouldRetryOnConnectionError()
                     || (!$canRetryAfterSend && !$this->failedBeforeSend($ex))
                 ) {
-                    throw new RequestException($this->redact($ex->getMessage()), $ex->getCode(), $ex);
+                    throw new RequestException($this->redact($ex->getMessage()), $ex->getCode(), $this->chainable($ex));
                 }
 
                 if ($attempt >= $maxAttempts - 1) {
                     throw new RequestException(
                         'Max retries exceeded: ' . $this->redact($ex->getMessage()),
                         $ex->getCode(),
-                        $ex
+                        $this->chainable($ex)
                     );
                 }
                 $applyRetryDelay = true;
@@ -178,7 +179,7 @@ class ApiCommunicator
                     'error' => $this->redact($ex->getMessage()),
                     'code' => $ex->getCode(),
                 ]);
-                throw new RequestException($this->redact($ex->getMessage()), $ex->getCode(), $ex);
+                throw new RequestException($this->redact($ex->getMessage()), $ex->getCode(), $this->chainable($ex));
             }
 
             $statusCode = $httpResponse->getStatusCode();
@@ -223,7 +224,7 @@ class ApiCommunicator
         throw new RequestException(
             'Max retries exceeded: ' . $this->redact($lastException?->getMessage() ?? 'Unknown error'),
             $lastException?->getCode() ?? 0,
-            $lastException
+            $lastException === null ? null : $this->chainable($lastException)
         );
     }
 
@@ -247,16 +248,17 @@ class ApiCommunicator
      */
     private function createHttpException(BadResponseException $ex, ResponseInterface $response): RequestException
     {
-        $body = (string)$response->getBody();
+        $body = $this->redact((string)$response->getBody());
         $decoded = json_decode($body);
         $apiErrors = is_object($decoded) ? $this->normalizeErrors($decoded->error ?? null) : [];
         $message = $this->redact($ex->getMessage());
+        $previous = $this->chainable($ex);
 
         if ($response->getStatusCode() === 404) {
-            return new NotFoundException($message, $ex, $body, $apiErrors);
+            return new NotFoundException($message, $previous, $body, $apiErrors);
         }
 
-        return new RequestException($message, $ex->getCode(), $ex, $response->getStatusCode(), $body, $apiErrors);
+        return new RequestException($message, $ex->getCode(), $previous, $response->getStatusCode(), $body, $apiErrors);
     }
 
     /**
@@ -278,6 +280,18 @@ class ApiCommunicator
         }
 
         return [$errors];
+    }
+
+    /**
+     * Returns the HTTP client exception to be chained as the previous exception. With query parameter
+     * authentication, its message and request URL contain the access token, so it is not chained:
+     * loggers and error trackers serialize the whole exception chain.
+     * @param Throwable $ex exception raised by the HTTP client
+     * @return Throwable|null exception safe to chain, or null
+     */
+    private function chainable(Throwable $ex): ?Throwable
+    {
+        return $this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY ? null : $ex;
     }
 
     /**

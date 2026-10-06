@@ -6,8 +6,8 @@ All notable changes to this project are documented in this file. The project fol
 
 ### Security
 
-- Encoded object names and relation names as single URL path segments and rejected the `.` and `..` dot segments. Previously, an object name such as `../users/admin` sent `DELETE /api/v6/users/admin.json` against a different endpoint.
-- Redacted the access token from exception messages, log entries, and `healthCheck()` errors. With query parameter authentication, Guzzle error messages previously included the full URL with `accessToken`.
+- Encoded object names and relation names as single URL path segments, and rejected values that could address a different endpoint: empty values, dot segments (also percent-encoded), and values containing `/`, `\`, or NUL. Model names containing dot segments are rejected as well. Previously, an object name such as `../users/admin` sent `DELETE /api/v6/users/admin.json` against a different endpoint.
+- Redacted the access token from exception messages, response bodies and API errors stored on exceptions, log entries, and `healthCheck()` errors. With query parameter authentication, Guzzle error messages previously included the full URL with `accessToken`. In that mode, the Guzzle exception, whose request URL contains the token, is no longer chained as the previous exception.
 
 ### Fixed
 

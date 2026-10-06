@@ -117,7 +117,7 @@ class Client
     {
         return $this->apiCommunicator->sendRequest(
             "POST",
-            $request->getModel(),
+            $this->validateModel($request->getModel()),
             $request->getAdditionalQueryParameters(),
             $request->getAttributes()
         );
@@ -287,27 +287,51 @@ class Client
             return $this->buildEndpoint($request->getModel(), $request->getObjectName(), $request->getRelation());
         }
 
-        return $request->getModel();
+        return $this->validateModel($request->getModel());
     }
 
     /**
      * Builds an API endpoint, encoding the object name and relation as single path segments.
+     * Segments that could address a different endpoint are rejected rather than encoded, because
+     * some server setups decode `%2F` before resolving the path.
      * @param string $model API model
      * @param string ...$segments object name and optional relation
      * @return string API endpoint
-     * @throws RequestException a segment is a dot segment that would change the endpoint
+     * @throws RequestException the model or a segment would change the addressed endpoint
      */
     private function buildEndpoint(string $model, string ...$segments): string
     {
-        $endpoint = $model;
+        $endpoint = $this->validateModel($model);
         foreach ($segments as $segment) {
-            if ($segment === '.' || $segment === '..') {
+            $decoded = rawurldecode($segment);
+            if ($segment === ''
+                || $decoded === '.'
+                || $decoded === '..'
+                || strpbrk($decoded, "/\\\0") !== false
+            ) {
                 throw new RequestException('Invalid object name or relation: ' . $segment);
             }
             $endpoint .= '/' . rawurlencode($segment);
         }
 
         return $endpoint;
+    }
+
+    /**
+     * Validates that the model does not contain dot segments that would leave the API namespace.
+     * @param string $model API model
+     * @return string validated API model
+     * @throws RequestException the model contains a dot segment
+     */
+    private function validateModel(string $model): string
+    {
+        foreach (preg_split('#[/\\\\]#', rawurldecode($model)) as $part) {
+            if ($part === '.' || $part === '..') {
+                throw new RequestException('Invalid model: ' . $model);
+            }
+        }
+
+        return $model;
     }
 
     /**

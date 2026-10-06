@@ -387,14 +387,14 @@ class ClientTest extends TestCase
         $communicator->expects($this->exactly(2))
             ->method('sendRequest')
             ->withConsecutive(
-                ['DELETE', 'Contacts/a%2Fb%20c%3Fd%23e', []],
-                ['GET', 'Tickets/x%2Fy/activities%2Fz', $this->anything()]
+                ['DELETE', 'Contacts/a%20b%3Fc%23d%25', []],
+                ['GET', 'Tickets/x%3Fy/activities%20z', $this->anything()]
             )
             ->willReturn(new Response(null, 0, [], 200));
         $client = $this->createClient($communicator);
 
-        $client->execute((new DeleteRequest('Contacts'))->setObjectName('a/b c?d#e'));
-        $client->execute((new ReadRequest('Tickets'))->setObjectName('x/y')->setRelation('activities/z'));
+        $client->execute((new DeleteRequest('Contacts'))->setObjectName('a b?c#d%'));
+        $client->execute((new ReadRequest('Tickets'))->setObjectName('x?y')->setRelation('activities z'));
     }
 
     /**
@@ -412,7 +412,7 @@ class ClientTest extends TestCase
 
     public function dotSegmentProvider(): array
     {
-        return [['.'], ['..']];
+        return [['.'], ['..'], ['%2e%2e'], ['../users/admin'], ['a/b'], ['a\\b'], ["a\0b"]];
     }
 
     public function testDotSegmentRelationIsRejected(): void
@@ -499,5 +499,37 @@ class ClientTest extends TestCase
         $request->setExecuted(true);
 
         $this->assertSame($expected, $client->execute($request));
+    }
+
+    public function testEmptyObjectNameWithRelationIsRejected(): void
+    {
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->never())->method('sendRequest');
+        $client = $this->createClient($communicator);
+
+        $this->expectException(RequestException::class);
+        $client->execute((new ReadRequest('Tickets'))->setObjectName('')->setRelation('activities'));
+    }
+
+    /**
+     * @dataProvider dotSegmentModelProvider
+     */
+    public function testModelWithDotSegmentIsRejected(ARequest $request): void
+    {
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->never())->method('sendRequest');
+        $client = $this->createClient($communicator);
+
+        $this->expectException(RequestException::class);
+        $client->execute($request);
+    }
+
+    public function dotSegmentModelProvider(): array
+    {
+        return [
+            'create' => [new CreateRequest('../../x')],
+            'read' => [new ReadRequest('Users/../..')],
+            'update' => [(new UpdateRequest('..\\x'))->setObjectName('a')],
+        ];
     }
 }

@@ -781,4 +781,39 @@ class ApiCommunicatorTest extends TestCase
 
         $this->assertSame('x', $communicator->sendRequest('GET', 'Users/x')->getFirstError()->message);
     }
+
+    public function testQueryAuthenticationDoesNotChainTokenBearingException(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_QUERY);
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(400, [], json_encode(['error' => ['echo SECRET'], 'result' => null])),
+            new ConnectException('cURL error 7 for /?accessToken=SECRET', new Request('GET', '/?accessToken=SECRET')),
+        ]));
+
+        foreach ([1, 2] as $_) {
+            try {
+                $communicator->sendRequest('GET', 'Users');
+                $this->fail('Expected RequestException');
+            } catch (RequestException $ex) {
+                $this->assertNull($ex->getPrevious());
+                $this->assertStringNotContainsString('SECRET', $ex->getMessage());
+                $this->assertStringNotContainsString('SECRET', (string)$ex->getResponseBody());
+                $this->assertStringNotContainsString('SECRET', json_encode($ex->getApiErrors()));
+            }
+        }
+    }
+
+    public function testHeaderAuthenticationKeepsPreviousException(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([new GuzzleResponse(400, [], '{}')]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertInstanceOf(GuzzleRequestException::class, $ex->getPrevious());
+        }
+    }
 }

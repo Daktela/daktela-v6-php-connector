@@ -223,7 +223,7 @@ $request = RequestFactory::buildDeleteRequest("CampaignsRecords")
 $response = $client->execute($request);
 ```
 
-Object names and relation names are URL-encoded as single path segments, so a value such as `a/b` is sent as `a%2Fb` and cannot address a different endpoint. The dot segments `.` and `..` are rejected with a `RequestException`.
+Object names and relation names are URL-encoded as single path segments. Values that could address a different endpoint (empty values, `.` and `..`, also percent-encoded, and values containing `/`, `\`, or NUL) are rejected with a `RequestException`, as are model names containing dot segments.
 
 ## Processing response
 
@@ -258,7 +258,7 @@ try {
 }
 ```
 
-The access token is replaced with `***` in exception messages and log entries produced by the connector. With query parameter authentication, the previous Guzzle exception (`$ex->getPrevious()`) still holds the original request URL, so do not log it.
+The access token is replaced with `***` in exception messages, the stored response body and API errors, and log entries produced by the connector. With query parameter authentication, the Guzzle exception is not chained as `$ex->getPrevious()`, because its request URL contains the token; use `getHttpStatus()`, `getResponseBody()`, and `getApiErrors()` instead. The response body may contain personal data, so log it with care.
 
 ## Authentication Methods
 

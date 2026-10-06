@@ -54,55 +54,33 @@ class ReadRequest extends ARequest
     /** @var string|null Variable containing the relation of the object to be returned when using the TYPE_MULTIPLE request type */
     private $relation = null;
 
-  /**
-   * Adds the filter to the current request type.
-   * @param string $field name of the field
-   * @param string $operator operator of the filter
-   * @param string|array $value value used for filtering
-   * @return $this current instance of the request to be used as builder pattern
-   */
+    /**
+     * Adds the filter to the current request type. Filters added this way are always
+     * combined with the already defined filters using the AND logic.
+     * @param string $field name of the field
+     * @param string $operator operator of the filter
+     * @param string|array $value value used for filtering
+     * @return $this current instance of the request to be used as builder pattern
+     */
     public function addFilter(string $field, string $operator, string|array $value): self
     {
-        $newFilter = ['field' => $field, 'operator' => $operator, 'value' => $value];
-
-        if (!isset($this->filters['filters'])) {
-            $this->filters['filters'] = [];
-        }
-        if (!isset($this->filters['logic'])) {
-            $this->filters['logic'] = 'and';
-        }
-
-        $this->filters['filters'][] = $newFilter;
-
-        return $this;
+        return $this->appendFilterGroup([
+            'logic' => 'and',
+            'filters' => [['field' => $field, 'operator' => $operator, 'value' => $value]],
+        ]);
     }
 
     /**
-     * Adds the filter to the current request type when using multiple filters at once.
+     * Adds a group of filters to the current request. The group can be a list of conditions
+     * (associative or `[field, operator, value]` shorthand), optionally with a `logic` key,
+     * or a structured `['logic' => ..., 'filters' => [...]]` group that may contain nested groups.
+     * The group is combined with the already defined filters using the AND logic.
      * @param array $filters array containing all filters to be added to the current filter build
      * @return $this current instance of the request to be used as builder pattern
      */
     public function addFilterFromArray(array $filters): self
     {
-        if (!isset($filters['filters'])) {
-            $filters = [
-                'logic' => $filters['logic'] ?? 'and',
-                'filters' => $filters,
-            ];
-        }
-
-        $newFilters = $this->reformatFilterArray($filters);
-
-        if (!isset($this->filters['filters'])) {
-            $this->filters['filters'] = [];
-        }
-        if (!isset($this->filters['logic'])) {
-            $this->filters['logic'] = $filters['logic'] ?? 'and';
-        }
-
-        $this->filters['filters'] = array_merge($this->filters['filters'], $newFilters['filters']);
-
-        return $this;
+        return $this->appendFilterGroup($this->normalizeFilterGroup($filters));
     }
 
     /**
@@ -226,32 +204,88 @@ class ReadRequest extends ARequest
     }
 
     /**
-     * Method normalizing the filter array structure.
-     * @param array $filters unstructured filter array
-     * @return array structured filter array
+     * Combines a normalized filter group with the current filters using the AND logic.
+     * Groups using a different logic are nested so that their meaning is preserved.
+     * @param array $group normalized filter group with `logic` and `filters` keys
+     * @return $this current instance of the request to be used as builder pattern
      */
-    private function reformatFilterArray(array &$filters): array
+    private function appendFilterGroup(array $group): self
     {
-        if (!isset($filters['filters'])) {
-            $filters['filters'] = $filters;
+        if (empty($group['filters'])) {
+            return $this;
         }
 
-        foreach ($filters['filters'] as &$filter) {
-            if (is_array($filter)
-                && count($filter) == 3
-                && array_key_exists(0, $filter) && array_key_exists(1, $filter) && array_key_exists(2, $filter)
-                && is_string($filter[0]) && is_string($filter[1]) && (is_string($filter[2]) || is_array($filter[2]))
-            ) {
-                $filter["field"] = $filter[0];
-                $filter["operator"] = $filter[1];
-                $filter["value"] = $filter[2];
-                unset($filter[0]);
-                unset($filter[1]);
-                unset($filter[2]);
-            }
+        if (empty($this->filters['filters'])) {
+            $this->filters = ['filters' => $group['filters'], 'logic' => $group['logic']];
+
+            return $this;
         }
 
-        return $filters;
+        if (strtolower($this->filters['logic'] ?? 'and') !== 'and') {
+            $this->filters = [
+                'logic' => 'and',
+                'filters' => [['logic' => $this->filters['logic'], 'filters' => $this->filters['filters']]],
+            ];
+        }
+
+        if (strtolower($group['logic']) === 'and') {
+            $this->filters['filters'] = array_merge($this->filters['filters'], $group['filters']);
+        } else {
+            $this->filters['filters'][] = $group;
+        }
+
+        return $this;
+    }
+
+    /**
+     * Method normalizing the filter array structure into a `logic`/`filters` group.
+     * @param array $filters unstructured filter array
+     * @return array structured filter group
+     */
+    private function normalizeFilterGroup(array $filters): array
+    {
+        if (isset($filters['field'])) {
+            $conditions = [$filters];
+        } elseif (isset($filters['filters']) && is_array($filters['filters'])) {
+            $conditions = $filters['filters'];
+        } else {
+            $conditions = $filters;
+            unset($conditions['logic']);
+        }
+
+        $normalized = [];
+        foreach ($conditions as $condition) {
+            $normalized[] = $this->normalizeFilterCondition($condition);
+        }
+
+        return ['logic' => is_string($filters['logic'] ?? null) ? $filters['logic'] : 'and', 'filters' => $normalized];
+    }
+
+    /**
+     * Normalizes a single filter condition, converting `[field, operator, value]` shorthand
+     * and nested groups into their structured form.
+     * @param mixed $condition filter condition or nested filter group
+     * @return mixed structured filter condition
+     */
+    private function normalizeFilterCondition(mixed $condition): mixed
+    {
+        if (!is_array($condition)) {
+            return $condition;
+        }
+
+        if (isset($condition['filters']) && is_array($condition['filters'])) {
+            return $this->normalizeFilterGroup($condition);
+        }
+
+        if (count($condition) === 3
+            && array_key_exists(0, $condition) && array_key_exists(1, $condition) && array_key_exists(2, $condition)
+            && is_string($condition[0]) && is_string($condition[1])
+            && (is_scalar($condition[2]) || is_array($condition[2]))
+        ) {
+            return ['field' => $condition[0], 'operator' => $condition[1], 'value' => $condition[2]];
+        }
+
+        return $condition;
     }
 
     /**

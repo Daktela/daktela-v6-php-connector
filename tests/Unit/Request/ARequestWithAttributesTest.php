@@ -147,4 +147,26 @@ class ARequestWithAttributesTest extends TestCase
         $this->assertSame($request, $result);
         $this->assertCount(4, $request->getAttributes());
     }
+
+    public function testAddAttributesSkipsNullByDefault(): void
+    {
+        $request = (new CreateRequest('Users'))->addAttributes(['title' => null, 'name' => 'John']);
+
+        $this->assertSame(['name' => 'John'], $request->getAttributes());
+    }
+
+    public function testAddAttributesCanIncludeNullToClearFields(): void
+    {
+        $request = (new CreateRequest('Users'))->addAttributes(['title' => null, 'name' => 'John'], true);
+
+        $this->assertSame(['title' => null, 'name' => 'John'], $request->getAttributes());
+    }
+
+    public function testAddAttributesKeepsObjectValues(): void
+    {
+        $value = new \ArrayObject(['a' => 1]);
+        $request = (new CreateRequest('Users'))->addAttributes(['custom' => $value]);
+
+        $this->assertSame(['custom' => $value], $request->getAttributes());
+    }
 }

@@ -411,4 +411,86 @@ class PaginatedIteratorTest extends TestCase
 
         $this->assertEquals(['User 1', 'User 2'], $names);
     }
+
+    private function createErrorResponse(int $total): GuzzleResponse
+    {
+        return new GuzzleResponse(200, [], json_encode([
+            'result' => ['data' => [], 'total' => $total],
+            'error' => ['Persistent error'],
+        ]));
+    }
+
+    public function testSkippingErrorsStopsWhenTotalIsUnknown(): void
+    {
+        $history = [];
+        $handlerStack = HandlerStack::create(new MockHandler(array_fill(0, 5, $this->createErrorResponse(0))));
+        $handlerStack->push(\GuzzleHttp\Middleware::history($history));
+        $client = new Client('https://test' . uniqid() . '.com', 'token');
+        $client->getApiCommunicator()->setHttpClient(new GuzzleClient(['handler' => $handlerStack]));
+        $iterator = new PaginatedIterator($client, new ReadRequest('Users'), pageSize: 2, stopOnError: false);
+
+        $this->assertSame([], iterator_to_array($iterator, false));
+        $this->assertCount(1, $history);
+        $this->assertTrue($iterator->hasStoppedOnError());
+    }
+
+    public function testSkippingErrorsStopsAtReportedTotal(): void
+    {
+        $history = [];
+        $handlerStack = HandlerStack::create(new MockHandler(array_fill(0, 5, $this->createErrorResponse(4))));
+        $handlerStack->push(\GuzzleHttp\Middleware::history($history));
+        $client = new Client('https://test' . uniqid() . '.com', 'token');
+        $client->getApiCommunicator()->setHttpClient(new GuzzleClient(['handler' => $handlerStack]));
+        $iterator = new PaginatedIterator($client, new ReadRequest('Users'), pageSize: 2, stopOnError: false);
+
+        $this->assertSame([], iterator_to_array($iterator, false));
+        $this->assertCount(2, $history);
+        $this->assertTrue($iterator->hasStoppedOnError());
+    }
+
+    public function testPagesStopsOnPersistentErrorsWithUnknownTotal(): void
+    {
+        $client = $this->createMockClient(array_fill(0, 5, $this->createErrorResponse(0)));
+        $iterator = new PaginatedIterator($client, new ReadRequest('Users'), pageSize: 2, stopOnError: false);
+
+        $this->assertCount(1, iterator_to_array($iterator->pages(), false));
+    }
+
+    public function testStopOnErrorExposesErrorResponse(): void
+    {
+        $client = $this->createMockClient([
+            $this->createJsonResponse([['id' => 1], ['id' => 2]], 4),
+            $this->createErrorResponse(4),
+        ]);
+        $iterator = new PaginatedIterator($client, new ReadRequest('Users'), pageSize: 2);
+
+        $this->assertCount(2, iterator_to_array($iterator, false));
+        $this->assertTrue($iterator->hasStoppedOnError());
+        $this->assertSame(['Persistent error'], $iterator->getErrorResponse()->getErrors());
+    }
+
+    public function testCompletedIterationHasNoErrorResponse(): void
+    {
+        $client = $this->createMockClient([$this->createJsonResponse([['id' => 1]], 1)]);
+        $iterator = new PaginatedIterator($client, new ReadRequest('Users'), pageSize: 2);
+
+        iterator_to_array($iterator, false);
+
+        $this->assertFalse($iterator->hasStoppedOnError());
+        $this->assertNull($iterator->getErrorResponse());
+    }
+
+    public function testIterationStartsAtRequestSkip(): void
+    {
+        $history = [];
+        $handlerStack = HandlerStack::create(new MockHandler([$this->createJsonResponse([['id' => 1]], 0)]));
+        $handlerStack->push(\GuzzleHttp\Middleware::history($history));
+        $client = new Client('https://test' . uniqid() . '.com', 'token');
+        $client->getApiCommunicator()->setHttpClient(new GuzzleClient(['handler' => $handlerStack]));
+
+        iterator_to_array(new PaginatedIterator($client, (new ReadRequest('Users'))->setSkip(40), pageSize: 10), false);
+
+        parse_str($history[0]['request']->getUri()->getQuery(), $query);
+        $this->assertSame('40', $query['skip']);
+    }
 }

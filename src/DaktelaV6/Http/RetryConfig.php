@@ -18,6 +18,10 @@ class RetryConfig
      * @param float $multiplier Multiplier for exponential backoff (e.g., 2.0 doubles delay each attempt)
      * @param array $retryableStatusCodes HTTP status codes that should trigger a retry
      * @param bool $retryOnConnectionError Whether to retry on connection errors
+     * @param bool $retryNonIdempotentRequests Whether POST requests may be retried after timeouts and
+     *     retryable status codes. A retry may then repeat an operation the server already performed
+     *     (e.g. create a duplicate record). POST requests are always retried when the connection
+     *     could not be established, because the request was never sent.
      */
     public function __construct(
         private int $maxRetries = 3,
@@ -26,6 +30,7 @@ class RetryConfig
         private float $multiplier = 2.0,
         private array $retryableStatusCodes = [408, 500, 502, 503, 504],
         private bool $retryOnConnectionError = true,
+        private bool $retryNonIdempotentRequests = false,
     ) {
     }
 
@@ -57,6 +62,11 @@ class RetryConfig
     public function shouldRetryOnConnectionError(): bool
     {
         return $this->retryOnConnectionError;
+    }
+
+    public function shouldRetryNonIdempotentRequests(): bool
+    {
+        return $this->retryNonIdempotentRequests;
     }
 
     /**

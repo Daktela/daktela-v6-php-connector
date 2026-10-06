@@ -62,9 +62,9 @@ abstract class ARequest
 
     /**
      * Returns the response of the request.
-     * @return Response response of the request
+     * @return Response|null response of the request, or null when none has been stored
      */
-    public function getResponse(): Response
+    public function getResponse(): ?Response
     {
         return $this->response;
     }

@@ -6,6 +6,7 @@ namespace Daktela\Tests\Unit;
 
 use Daktela\DaktelaV6\Client;
 use Daktela\DaktelaV6\Exception\NotFoundException;
+use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Exception\UnknownRequestTypeException;
 use Daktela\DaktelaV6\Http\ApiCommunicator;
 use Daktela\DaktelaV6\Iterator\PaginatedIterator;
@@ -378,5 +379,188 @@ class ClientTest extends TestCase
         $this->assertSame(25, $this->getPrivateProperty($iterator, 'pageSize'));
         $this->assertSame(50, $this->getPrivateProperty($iterator, 'maxItems'));
         $this->assertFalse($this->getPrivateProperty($iterator, 'stopOnError'));
+    }
+
+    public function testObjectNameAndRelationAreEncodedAsPathSegments(): void
+    {
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->exactly(2))
+            ->method('sendRequest')
+            ->withConsecutive(
+                ['DELETE', 'Contacts/a%20b%3Fc%23d%25', []],
+                ['GET', 'Tickets/x%3Fy/activities%20z', $this->anything()]
+            )
+            ->willReturn(new Response(null, 0, [], 200));
+        $client = $this->createClient($communicator);
+
+        $client->execute((new DeleteRequest('Contacts'))->setObjectName('a b?c#d%'));
+        $client->execute((new ReadRequest('Tickets'))->setObjectName('x?y')->setRelation('activities z'));
+    }
+
+    /**
+     * @dataProvider dotSegmentProvider
+     */
+    public function testDotSegmentObjectNamesAreRejected(string $objectName): void
+    {
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->never())->method('sendRequest');
+        $client = $this->createClient($communicator);
+
+        $this->expectException(RequestException::class);
+        $client->execute((new DeleteRequest('Contacts'))->setObjectName($objectName));
+    }
+
+    public function dotSegmentProvider(): array
+    {
+        return [['.'], ['..'], ['%2e%2e'], ['../users/admin'], ['a/b'], ['a\\b'], ["a\0b"]];
+    }
+
+    public function testDotSegmentRelationIsRejected(): void
+    {
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->never())->method('sendRequest');
+        $client = $this->createClient($communicator);
+
+        $this->expectException(RequestException::class);
+        $client->execute((new ReadRequest('Tickets'))->setObjectName('1')->setRelation('..'));
+    }
+
+    public function testObjectNameZeroIsAccepted(): void
+    {
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->exactly(3))
+            ->method('sendRequest')
+            ->withConsecutive(
+                ['GET', 'Users/0', []],
+                ['PUT', 'Users/0', [], []],
+                ['DELETE', 'Users/0', []]
+            )
+            ->willReturn(new Response(null, 0, [], 200));
+        $client = $this->createClient($communicator);
+
+        $client->execute((new ReadRequest('Users'))->setRequestType(ReadRequest::TYPE_SINGLE)->setObjectName('0'));
+        $client->execute((new UpdateRequest('Users'))->setObjectName('0'));
+        $client->execute((new DeleteRequest('Users'))->setObjectName('0'));
+    }
+
+    public function testConstructorAcceptsDedicatedCommunicator(): void
+    {
+        $url = 'https://test-' . uniqid() . '.example.com';
+        $communicator = new ApiCommunicator($url, 'token');
+
+        $client = new Client($url, 'token', $communicator);
+
+        $this->assertSame($communicator, $client->getApiCommunicator());
+        $this->assertNotSame($communicator, (new Client($url, 'token'))->getApiCommunicator());
+    }
+
+    public function testReadAllReportsTruncationAtReadLimit(): void
+    {
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->exactly(Client::READ_LIMIT))
+            ->method('sendRequest')
+            ->willReturn(new Response([['id' => 1]], 0, [], 200));
+        $client = $this->createClient($communicator);
+        $request = (new ReadRequest('Users'))->setRequestType(ReadRequest::TYPE_ALL)->setTake(1);
+
+        $response = $client->execute($request);
+
+        $this->assertCount(Client::READ_LIMIT, $response->getData());
+        $this->assertTrue($response->hasErrors());
+        $this->assertStringContainsString('truncated', $response->getFirstError());
+    }
+
+    public function testReadAllStartsAtRequestSkip(): void
+    {
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->exactly(2))
+            ->method('sendRequest')
+            ->withConsecutive(
+                ['GET', 'Users', $this->callback(fn(array $q): bool => $q['skip'] === 5)],
+                ['GET', 'Users', $this->callback(fn(array $q): bool => $q['skip'] === 7)]
+            )
+            ->willReturnOnConsecutiveCalls(
+                new Response([['id' => 1], ['id' => 2]], 0, [], 200),
+                new Response([['id' => 3]], 0, [], 200)
+            );
+        $client = $this->createClient($communicator);
+        $request = (new ReadRequest('Users'))->setRequestType(ReadRequest::TYPE_ALL)->setTake(2)->setSkip(5);
+
+        $this->assertCount(3, $client->execute($request)->getData());
+    }
+
+    public function testExecuteSendsRequestWhenExecutedFlagHasNoResponse(): void
+    {
+        $communicator = $this->createCommunicator();
+        $expected = new Response([], 0, [], 200);
+        $communicator->expects($this->once())->method('sendRequest')->willReturn($expected);
+        $client = $this->createClient($communicator);
+        $request = new ReadRequest('Users');
+        $request->setExecuted(true);
+
+        $this->assertSame($expected, $client->execute($request));
+    }
+
+    public function testEmptyObjectNameWithRelationIsRejected(): void
+    {
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->never())->method('sendRequest');
+        $client = $this->createClient($communicator);
+
+        $this->expectException(RequestException::class);
+        $client->execute((new ReadRequest('Tickets'))->setObjectName('')->setRelation('activities'));
+    }
+
+    /**
+     * @dataProvider dotSegmentModelProvider
+     */
+    public function testModelWithDotSegmentIsRejected(ARequest $request): void
+    {
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->never())->method('sendRequest');
+        $client = $this->createClient($communicator);
+
+        $this->expectException(RequestException::class);
+        $client->execute($request);
+    }
+
+    public function dotSegmentModelProvider(): array
+    {
+        return [
+            'create' => [new CreateRequest('../../x')],
+            'read' => [new ReadRequest('Users/../..')],
+            'update' => [(new UpdateRequest('..\\x'))->setObjectName('a')],
+        ];
+    }
+
+    public function testReadAllWithSkipStopsAtReportedTotal(): void
+    {
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->once())
+            ->method('sendRequest')
+            ->willReturn(new Response([['id' => 3], ['id' => 4]], 4, [], 200));
+        $client = $this->createClient($communicator);
+        $request = (new ReadRequest('Users'))->setRequestType(ReadRequest::TYPE_ALL)->setTake(2)->setSkip(2);
+
+        $this->assertCount(2, $client->execute($request)->getData());
+    }
+
+    public function testReadAllCompletingOnLastAllowedPageIsNotTruncated(): void
+    {
+        $calls = 0;
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->exactly(Client::READ_LIMIT))
+            ->method('sendRequest')
+            ->willReturnCallback(function () use (&$calls): Response {
+                $calls++;
+                return new Response([['id' => $calls]], Client::READ_LIMIT, [], 200);
+            });
+        $client = $this->createClient($communicator);
+        $request = (new ReadRequest('Users'))->setRequestType(ReadRequest::TYPE_ALL)->setTake(1);
+
+        $response = $client->execute($request);
+
+        $this->assertCount(Client::READ_LIMIT, $response->getData());
+        $this->assertFalse($response->hasErrors());
     }
 }

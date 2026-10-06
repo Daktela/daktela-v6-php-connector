@@ -88,14 +88,6 @@ class RateLimitConfigTest extends TestCase
         $this->assertEquals(7, $config->parseRetryAfter('not a number or date'));
     }
 
-    public function testParseRetryAfterWithNegativeNumber(): void
-    {
-        $config = new RateLimitConfig();
-
-        // Negative numbers are treated as valid integers
-        $this->assertEquals(-5, $config->parseRetryAfter('-5'));
-    }
-
     public function testParseRetryAfterWithDecimal(): void
     {
         $config = new RateLimitConfig();
@@ -103,5 +95,10 @@ class RateLimitConfigTest extends TestCase
         // Decimal numbers are truncated to integers
         $this->assertEquals(10, $config->parseRetryAfter('10.5'));
         $this->assertEquals(10, $config->parseRetryAfter('10.9'));
+    }
+
+    public function testNegativeRetryAfterIsClampedToZero(): void
+    {
+        $this->assertSame(0, (new RateLimitConfig())->parseRetryAfter('-5'));
     }
 }

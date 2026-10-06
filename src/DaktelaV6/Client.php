@@ -41,13 +41,17 @@ class Client
 
     /**
      * Client constructor.
+     * By default, all clients created for the same instance and access token share one
+     * ApiCommunicator, so transport settings (retries, logger, HTTP client, ...) apply to all of them.
+     * Pass a dedicated ApiCommunicator to configure this client independently.
      * @param string $instance URL of the Daktela instance the client is connecting to
      * @param string $accessToken access token of the connecting user
+     * @param ApiCommunicator|null $apiCommunicator dedicated transport, or null to use the shared one
      * @noinspection PhpUnused
      */
-    public function __construct(string $instance, string $accessToken)
+    public function __construct(string $instance, string $accessToken, ?ApiCommunicator $apiCommunicator = null)
     {
-        $this->apiCommunicator = ApiCommunicator::getInstance($instance, $accessToken);
+        $this->apiCommunicator = $apiCommunicator ?? ApiCommunicator::getInstance($instance, $accessToken);
     }
 
     /**
@@ -59,7 +63,7 @@ class Client
      */
     public static function getInstance(string $instance, string $accessToken): self
     {
-        $key = md5($instance . $accessToken);
+        $key = hash('sha256', $instance . "\0" . $accessToken);
         if (!isset(self::$singletons[$key])) {
             self::$singletons[$key] = new Client($instance, $accessToken);
         }
@@ -79,7 +83,7 @@ class Client
      */
     public function execute(ARequest $request): Response
     {
-        if ($request->isExecuted()) {
+        if ($request->isExecuted() && $request->getResponse() !== null) {
             return $request->getResponse();
         }
 
@@ -113,7 +117,7 @@ class Client
     {
         return $this->apiCommunicator->sendRequest(
             "POST",
-            $request->getModel(),
+            $this->validateModel($request->getModel()),
             $request->getAdditionalQueryParameters(),
             $request->getAttributes()
         );
@@ -127,13 +131,13 @@ class Client
      */
     private function executeUpdate(UpdateRequest $request): Response
     {
-        if (empty($request->getObjectName())) {
+        if ($request->getObjectName() === '') {
             throw new NotFoundException('No object name specified');
         }
 
         return $this->apiCommunicator->sendRequest(
             "PUT",
-            $request->getModel() . "/" . $request->getObjectName(),
+            $this->buildEndpoint($request->getModel(), $request->getObjectName()),
             $request->getAdditionalQueryParameters(),
             $request->getAttributes()
         );
@@ -147,13 +151,13 @@ class Client
      */
     private function executeDelete(DeleteRequest $request): Response
     {
-        if (empty($request->getObjectName())) {
+        if ($request->getObjectName() === '') {
             throw new NotFoundException('No object name specified');
         }
 
         return $this->apiCommunicator->sendRequest(
             "DELETE",
-            $request->getModel() . "/" . $request->getObjectName(),
+            $this->buildEndpoint($request->getModel(), $request->getObjectName()),
             $request->getAdditionalQueryParameters()
         );
     }
@@ -166,36 +170,18 @@ class Client
      */
     private function executeReadMultiple(ReadRequest $request): Response
     {
-        $queryParams = array_merge(
-            $request->getAdditionalQueryParameters(),
-            [
-                'skip' => $request->getSkip(),
-                'take' => $request->getTake(),
-                'filter' => $request->getFilters(),
-                'sort' => $request->getSorts(),
-            ]
+        return $this->apiCommunicator->sendRequest(
+            "GET",
+            $this->buildReadEndpoint($request),
+            $this->buildReadQuery($request, $request->getSkip())
         );
-
-        /** @noinspection DuplicatedCode */
-        if (count($request->getFields()) > 0) {
-            //The `$request->getFields()['fields'] ?: $request->getFields()` syntax is a workaround that will be removed in future versions
-            $fields = $request->getFields();
-            $queryParams = array_merge($queryParams, ['fields' => $fields['fields'] ?? $fields]);
-        }
-
-        //Define the API endpoint (if relational data are read, read them)
-        $endpoint = $request->getModel();
-        if (!is_null($request->getRelation()) && !is_null($request->getObjectName())) {
-            $endpoint .= "/" . $request->getObjectName() . "/" . $request->getRelation();
-        }
-
-        return $this->apiCommunicator->sendRequest("GET", $endpoint, $queryParams);
     }
 
     /**
      * Performs the Read action (GET) when the client is requesting all resulting records without
      * respect to the pagination. This method therefore provides the pagination up to
-     * the READ_LIMIT specified as constant of this class.
+     * the READ_LIMIT pages, starting at the skip offset of the request. When the limit is reached
+     * before all records are read, an error describing the truncation is added to the response.
      * @param ReadRequest $request instance of the request to be performed on the Daktela API
      * @return Response immutable object containing the response information
      * @throws RequestException a request exception has occurred
@@ -203,30 +189,9 @@ class Client
     private function executeReadAll(ReadRequest $request): Response
     {
         $response = new Response([], 0, [], 0);
+        $endpoint = $this->buildReadEndpoint($request);
         for ($i = 0; $i < self::READ_LIMIT; $i++) {
-            $queryParams = array_merge(
-                $request->getAdditionalQueryParameters(),
-                [
-                    'skip' => ($i * $request->getTake()),
-                    'take' => $request->getTake(),
-                    'filter' => $request->getFilters(),
-                    'sort' => $request->getSorts(),
-                ]
-            );
-
-            /** @noinspection DuplicatedCode */
-            if (count($request->getFields()) > 0) {
-                //The `$request->getFields()['fields'] ?: $request->getFields()` syntax is a workaround that will be removed in future versions
-                $fields = $request->getFields();
-                $queryParams = array_merge($queryParams, ['fields' => $fields['fields'] ?? $fields]);
-            }
-
-            //Define the API endpoint (if relational data are read, read them)
-            $endpoint = $request->getModel();
-            if (!is_null($request->getRelation()) && !is_null($request->getObjectName())) {
-                $endpoint .= "/" . $request->getObjectName() . "/" . $request->getRelation();
-            }
-
+            $queryParams = $this->buildReadQuery($request, $request->getSkip() + ($i * $request->getTake()));
             $currentResponse = $this->apiCommunicator->sendRequest("GET", $endpoint, $queryParams);
 
             if (!empty($currentResponse->getErrors()) && !$request->isSkipErrorRequests()) {
@@ -255,13 +220,118 @@ class Client
             //If returned less than take, it is the last page
             if (count($currentData) < $request->getTake()
                 || ($currentResponse->getTotal() > 0
-                    && count($data) >= $currentResponse->getTotal())
+                    && $request->getSkip() + count($data) >= $currentResponse->getTotal())
             ) {
-                break;
+                return $response;
             }
         }
 
-        return $response;
+        return new Response(
+            $response->getData(),
+            $response->getTotal(),
+            array_merge(
+                $response->getErrors(),
+                ['Read limit of ' . self::READ_LIMIT . ' pages reached; the result is truncated']
+            ),
+            $response->getHttpStatus()
+        );
+    }
+
+    /**
+     * Builds the query parameters of a multiple-records read request.
+     * @param ReadRequest $request read request
+     * @param int $skip skip offset of the page to be read
+     * @return array query parameters
+     */
+    private function buildReadQuery(ReadRequest $request, int $skip): array
+    {
+        $queryParams = array_merge(
+            $request->getAdditionalQueryParameters(),
+            [
+                'skip' => $skip,
+                'take' => $request->getTake(),
+                'filter' => $request->getFilters(),
+                'sort' => $request->getSorts(),
+            ]
+        );
+
+        return $this->addFieldsQuery($request, $queryParams);
+    }
+
+    /**
+     * Adds the requested fields to the query parameters.
+     * @param ReadRequest $request read request
+     * @param array $queryParams query parameters
+     * @return array query parameters including the fields
+     */
+    private function addFieldsQuery(ReadRequest $request, array $queryParams): array
+    {
+        if (count($request->getFields()) > 0) {
+            //The `$request->getFields()['fields'] ?? $request->getFields()` syntax is a workaround that will be removed in future versions
+            $fields = $request->getFields();
+            $queryParams = array_merge($queryParams, ['fields' => $fields['fields'] ?? $fields]);
+        }
+
+        return $queryParams;
+    }
+
+    /**
+     * Builds the endpoint of a multiple-records read request (if relational data are read, read them).
+     * @param ReadRequest $request read request
+     * @return string API endpoint
+     * @throws RequestException the object name or relation is not a valid path segment
+     */
+    private function buildReadEndpoint(ReadRequest $request): string
+    {
+        if (!is_null($request->getRelation()) && !is_null($request->getObjectName())) {
+            return $this->buildEndpoint($request->getModel(), $request->getObjectName(), $request->getRelation());
+        }
+
+        return $this->validateModel($request->getModel());
+    }
+
+    /**
+     * Builds an API endpoint, encoding the object name and relation as single path segments.
+     * Segments that could address a different endpoint are rejected rather than encoded, because
+     * some server setups decode `%2F` before resolving the path.
+     * @param string $model API model
+     * @param string ...$segments object name and optional relation
+     * @return string API endpoint
+     * @throws RequestException the model or a segment would change the addressed endpoint
+     */
+    private function buildEndpoint(string $model, string ...$segments): string
+    {
+        $endpoint = $this->validateModel($model);
+        foreach ($segments as $segment) {
+            $decoded = rawurldecode($segment);
+            if ($segment === ''
+                || $decoded === '.'
+                || $decoded === '..'
+                || strpbrk($decoded, "/\\\0") !== false
+            ) {
+                throw new RequestException('Invalid object name or relation: ' . $segment);
+            }
+            $endpoint .= '/' . rawurlencode($segment);
+        }
+
+        return $endpoint;
+    }
+
+    /**
+     * Validates that the model does not contain dot segments that would leave the API namespace.
+     * @param string $model API model
+     * @return string validated API model
+     * @throws RequestException the model contains a dot segment
+     */
+    private function validateModel(string $model): string
+    {
+        foreach (preg_split('#[/\\\\]#', rawurldecode($model)) as $part) {
+            if ($part === '.' || $part === '..') {
+                throw new RequestException('Invalid model: ' . $model);
+            }
+        }
+
+        return $model;
     }
 
     /**
@@ -272,21 +342,14 @@ class Client
      */
     private function executeReadSingle(ReadRequest $request): Response
     {
-        if (empty($request->getObjectName())) {
+        if ($request->getObjectName() === null || $request->getObjectName() === '') {
             throw new NotFoundException('No object name specified');
-        }
-
-        $queryParams = $request->getAdditionalQueryParameters();
-        if (count($request->getFields()) > 0) {
-            //The `$request->getFields()['fields'] ?: $request->getFields()` syntax is a workaround that will be removed in future versions
-            $fields = $request->getFields();
-            $queryParams = array_merge($queryParams, ['fields' => $fields['fields'] ?? $fields]);
         }
 
         return $this->apiCommunicator->sendRequest(
             "GET",
-            $request->getModel() . "/" . $request->getObjectName(),
-            $queryParams
+            $this->buildEndpoint($request->getModel(), $request->getObjectName()),
+            $this->addFieldsQuery($request, $request->getAdditionalQueryParameters())
         );
     }
 

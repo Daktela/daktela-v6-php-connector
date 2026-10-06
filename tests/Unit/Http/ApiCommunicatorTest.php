@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Daktela\Tests\Unit\Http;
 
+use Daktela\DaktelaV6\Exception\NotFoundException;
 use Daktela\DaktelaV6\Exception\RateLimitException;
 use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Http\ApiCommunicator;
@@ -597,5 +598,395 @@ class ApiCommunicatorTest extends TestCase
         $this->assertFalse($result['healthy']);
         $this->assertArrayHasKey('latency_ms', $result);
         $this->assertArrayHasKey('error', $result);
+    }
+
+    private function connectError(int $errno): ConnectException
+    {
+        return new ConnectException(
+            "cURL error {$errno}",
+            new Request('POST', '/api/v6/users.json'),
+            null,
+            ['errno' => $errno]
+        );
+    }
+
+    private function okResponse(): GuzzleResponse
+    {
+        return new GuzzleResponse(200, [], json_encode(['error' => [], 'result' => ['data' => [], 'total' => 0]]));
+    }
+
+    public function testPostIsNotRetriedAfterTimeout(): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([$this->connectError(28), $this->okResponse()], $history));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        try {
+            $communicator->sendRequest('POST', 'Users', [], ['name' => 'x']);
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertCount(1, $history);
+        }
+    }
+
+    public function testPostIsRetriedWhenConnectionWasRefused(): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([$this->connectError(7), $this->okResponse()], $history));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        $this->assertTrue($communicator->sendRequest('POST', 'Users', [], ['name' => 'x'])->isSuccess());
+        $this->assertCount(2, $history);
+    }
+
+    public function testPostIsNotRetriedOnServerError(): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([new GuzzleResponse(503), $this->okResponse()], $history));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        $this->expectException(RequestException::class);
+        try {
+            $communicator->sendRequest('POST', 'Users', [], ['name' => 'x']);
+        } finally {
+            $this->assertCount(1, $history);
+        }
+    }
+
+    public function testPostRetryCanBeEnabledExplicitly(): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([$this->connectError(28), $this->okResponse()], $history));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0, retryNonIdempotentRequests: true));
+
+        $this->assertTrue($communicator->sendRequest('POST', 'Users', [], ['name' => 'x'])->isSuccess());
+        $this->assertCount(2, $history);
+    }
+
+    public function testPutIsStillRetriedOnServerError(): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([new GuzzleResponse(503), $this->okResponse()], $history));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        $this->assertTrue($communicator->sendRequest('PUT', 'Users/x', [], ['name' => 'x'])->isSuccess());
+        $this->assertCount(2, $history);
+    }
+
+    public function testAccessTokenIsRedactedFromExceptionsAndLogs(): void
+    {
+        $logged = [];
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->method('error')->willReturnCallback(function (string $message, array $context) use (&$logged): void {
+            $logged[] = $message . json_encode($context);
+        });
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET/TOKEN+1');
+        $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_QUERY);
+        $communicator->setLogger($logger);
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(400, [], json_encode(['error' => ['bad'], 'result' => null])),
+        ]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertStringNotContainsString('SECRET', $ex->getMessage());
+            $this->assertStringContainsString('accessToken=***', $ex->getMessage());
+        }
+        $this->assertNotEmpty($logged);
+        foreach ($logged as $line) {
+            $this->assertStringNotContainsString('SECRET', $line);
+        }
+    }
+
+    public function testHttpErrorExposesStatusBodyAndApiErrors(): void
+    {
+        $body = json_encode(['error' => ['number' => 'required'], 'result' => null]);
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([new GuzzleResponse(400, [], $body)]));
+
+        try {
+            $communicator->sendRequest('POST', 'Users', [], []);
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame(400, $ex->getHttpStatus());
+            $this->assertSame($body, $ex->getResponseBody());
+            $this->assertSame(['number' => 'required'], $ex->getApiErrors());
+        }
+    }
+
+    public function testHttpNotFoundThrowsNotFoundException(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(404, [], json_encode(['error' => ['Not found'], 'result' => null])),
+        ]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users/missing');
+            $this->fail('Expected NotFoundException');
+        } catch (NotFoundException $ex) {
+            $this->assertSame(404, $ex->getCode());
+            $this->assertSame(['Not found'], $ex->getApiErrors());
+        }
+    }
+
+    public function testErrorsAreKeptWhenResultIsNull(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(200, [], json_encode(['error' => ['Access denied'], 'result' => null])),
+        ]));
+
+        $response = $communicator->sendRequest('GET', 'Users/x');
+
+        $this->assertSame(['Access denied'], $response->getErrors());
+    }
+
+    public function testObjectShapedErrorsAreNormalizedToArray(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(200, [], json_encode(['error' => ['title' => 'required'], 'result' => ['id' => 1]])),
+            new GuzzleResponse(200, [], json_encode(['error' => 'Plain message', 'result' => ['id' => 1]])),
+        ]));
+
+        $this->assertSame(['title' => 'required'], $communicator->sendRequest('GET', 'Users/x')->getErrors());
+        $this->assertSame(['Plain message'], $communicator->sendRequest('GET', 'Users/x')->getErrors());
+    }
+
+    public function testBaseUrlPathIsPreserved(): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com/daktela/', 'token');
+        $communicator->setHttpClient($this->createMockClient([$this->okResponse()], $history));
+
+        $communicator->sendRequest('GET', 'Users');
+
+        $this->assertSame('/daktela/api/v6/users.json', $history[0]['request']->getUri()->getPath());
+    }
+
+    public function testErrorListEntriesKeepTheirDecodedShape(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(200, [], json_encode(['error' => [['message' => 'x']], 'result' => ['id' => 1]])),
+        ]));
+
+        $this->assertSame('x', $communicator->sendRequest('GET', 'Users/x')->getFirstError()->message);
+    }
+
+    public function testQueryAuthenticationDoesNotChainTokenBearingException(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_QUERY);
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(400, [], json_encode(['error' => ['echo SECRET'], 'result' => null])),
+            new ConnectException('cURL error 7 for /?accessToken=SECRET', new Request('GET', '/?accessToken=SECRET')),
+        ]));
+
+        foreach ([1, 2] as $_) {
+            try {
+                $communicator->sendRequest('GET', 'Users');
+                $this->fail('Expected RequestException');
+            } catch (RequestException $ex) {
+                $this->assertNull($ex->getPrevious());
+                $this->assertStringNotContainsString('SECRET', $ex->getMessage());
+                $this->assertStringNotContainsString('SECRET', (string)$ex->getResponseBody());
+                $this->assertStringNotContainsString('SECRET', json_encode($ex->getApiErrors()));
+            }
+        }
+    }
+
+    public function testHeaderAuthenticationKeepsPreviousException(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([new GuzzleResponse(400, [], '{}')]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertInstanceOf(GuzzleRequestException::class, $ex->getPrevious());
+        }
+    }
+
+    public function testJsonEscapedTokenIsRedactedFromResponseBody(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'ab/cd');
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(400, [], '{"error":["bad token ab\\/cd"]}'),
+        ]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame(['bad token ***'], $ex->getApiErrors());
+        }
+    }
+
+    public function testPostIsRetriedOnRateLimit(): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(429, ['Retry-After' => '0']),
+            $this->okResponse(),
+        ], $history));
+        $communicator->setRateLimitConfig(new RateLimitConfig());
+
+        $this->assertTrue($communicator->sendRequest('POST', 'Users', [], ['name' => 'x'])->isSuccess());
+        $this->assertCount(2, $history);
+    }
+
+    public function testPostRetryOnServerErrorCanBeEnabledExplicitly(): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([new GuzzleResponse(503), $this->okResponse()], $history));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0, retryNonIdempotentRequests: true));
+
+        $this->assertTrue($communicator->sendRequest('POST', 'Users', [], ['name' => 'x'])->isSuccess());
+        $this->assertCount(2, $history);
+    }
+
+    public function testBaseUrlEndingWithApiNamespaceIsNotDuplicated(): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com/api/v6/', 'token');
+        $communicator->setHttpClient($this->createMockClient([$this->okResponse()], $history));
+
+        $communicator->sendRequest('GET', 'Users');
+
+        $this->assertSame('/api/v6/users.json', $history[0]['request']->getUri()->getPath());
+    }
+
+    /**
+     * @dataProvider postConnectErrorProvider
+     */
+    public function testPostRetryOnConnectErrorDependsOnWhetherRequestWasSent(?int $errno, int $expectedRequests): void
+    {
+        $history = [];
+        $error = new ConnectException('cURL error', new Request('POST', '/'), null, $errno === null ? [] : ['errno' => $errno]);
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([$error, $this->okResponse()], $history));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        try {
+            $communicator->sendRequest('post', 'Users', [], ['name' => 'x']);
+        } catch (RequestException $ex) {
+            // Not retried
+        }
+
+        $this->assertCount($expectedRequests, $history);
+    }
+
+    public function postConnectErrorProvider(): array
+    {
+        return [
+            'could not resolve host' => [6, 2],
+            'could not connect' => [7, 2],
+            'TLS handshake failed' => [35, 2],
+            'timeout' => [28, 1],
+            'receive failure' => [56, 1],
+            'unknown' => [null, 1],
+        ];
+    }
+
+    /**
+     * @dataProvider idempotentMethodProvider
+     */
+    public function testIdempotentMethodsAreRetriedOnServerError(string $method): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([new GuzzleResponse(503), $this->okResponse()], $history));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        $communicator->sendRequest($method, 'Users/x');
+
+        $this->assertCount(2, $history);
+    }
+
+    public function idempotentMethodProvider(): array
+    {
+        return [['GET'], ['PUT'], ['DELETE'], ['delete'], ['HEAD'], ['OPTIONS']];
+    }
+
+    public function testAccessTokenIsRedactedOnEveryRetryAndErrorPath(): void
+    {
+        $logged = [];
+        $logger = $this->createMock(LoggerInterface::class);
+        foreach (['debug', 'info', 'warning', 'error'] as $level) {
+            $logger->method($level)->willReturnCallback(function (string $message, array $context = []) use (&$logged): void {
+                $logged[] = $message . json_encode($context);
+            });
+        }
+        $connectError = fn(): ConnectException => new ConnectException(
+            'cURL error 7: Failed to connect for https://example.com/?accessToken=SECRET',
+            new Request('GET', '/?accessToken=SECRET'),
+            null,
+            ['errno' => 7]
+        );
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_QUERY);
+        $communicator->setLogger($logger);
+        $communicator->setRetryConfig(new RetryConfig(maxRetries: 2, baseDelayMs: 0));
+        $communicator->setHttpClient($this->createMockClient([
+            $connectError(),
+            $connectError(),
+            $connectError(),
+            new \GuzzleHttp\Exception\TransferException('Transfer failed for /?accessToken=SECRET'),
+        ]));
+
+        $messages = [];
+        foreach ([1, 2] as $_) {
+            try {
+                $communicator->sendRequest('GET', 'Users');
+                $this->fail('Expected RequestException');
+            } catch (RequestException $ex) {
+                $this->assertNull($ex->getPrevious());
+                $messages[] = $ex->getMessage();
+            }
+        }
+
+        $this->assertStringStartsWith('Max retries exceeded', $messages[0]);
+        $this->assertNotEmpty($logged);
+        foreach (array_merge($messages, $logged) as $line) {
+            $this->assertStringNotContainsString('SECRET', $line);
+        }
+    }
+
+    public function testHealthCheckErrorDoesNotContainAccessToken(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_QUERY);
+        $communicator->setHttpClient($this->createMockClient([
+            new ConnectException('cURL error 7 for /?accessToken=SECRET', new Request('GET', '/?accessToken=SECRET')),
+        ]));
+
+        $health = $communicator->healthCheck();
+
+        $this->assertFalse($health['healthy']);
+        $this->assertStringNotContainsString('SECRET', $health['error']);
+    }
+
+    public function testEncodedObjectNameSurvivesInRequestUri(): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([$this->okResponse()], $history));
+        $client = new \Daktela\DaktelaV6\Client('https://example.com', 'token', $communicator);
+
+        $client->execute(\Daktela\DaktelaV6\RequestFactory::buildReadSingleRequest('Users', 'a b?c#d'));
+
+        $this->assertSame('/api/v6/users/a%20b%3Fc%23d.json', $history[0]['request']->getUri()->getPath());
     }
 }

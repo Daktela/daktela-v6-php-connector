@@ -53,7 +53,7 @@ class RateLimitConfig
 
         // Try parsing as integer seconds
         if (is_numeric($headerValue)) {
-            return (int)$headerValue;
+            return max(0, (int)$headerValue);
         }
 
         // Try parsing as HTTP date

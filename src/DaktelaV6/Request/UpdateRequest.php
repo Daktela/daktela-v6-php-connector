@@ -13,7 +13,7 @@ namespace Daktela\DaktelaV6\Request;
  * $request = RequestFactory::buildUpdateRequest("CampaignsRecords")
  *     ->setObjectName("records_5fa299a48ab72834012563")
  *     ->addStringAttribute("number", "00420226211245")
- *     ->addIntAttribute("number", 0)
+ *     ->addIntAttribute("action", 0)
  *     ->addAttributes(["queue" => 3000]);
  * ```
  *

@@ -831,4 +831,40 @@ class ApiCommunicatorTest extends TestCase
             $this->assertSame(['bad token ***'], $ex->getApiErrors());
         }
     }
+
+    public function testPostIsRetriedOnRateLimit(): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(429, ['Retry-After' => '0']),
+            $this->okResponse(),
+        ], $history));
+        $communicator->setRateLimitConfig(new RateLimitConfig());
+
+        $this->assertTrue($communicator->sendRequest('POST', 'Users', [], ['name' => 'x'])->isSuccess());
+        $this->assertCount(2, $history);
+    }
+
+    public function testPostRetryOnServerErrorCanBeEnabledExplicitly(): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([new GuzzleResponse(503), $this->okResponse()], $history));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0, retryNonIdempotentRequests: true));
+
+        $this->assertTrue($communicator->sendRequest('POST', 'Users', [], ['name' => 'x'])->isSuccess());
+        $this->assertCount(2, $history);
+    }
+
+    public function testBaseUrlEndingWithApiNamespaceIsNotDuplicated(): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com/api/v6/', 'token');
+        $communicator->setHttpClient($this->createMockClient([$this->okResponse()], $history));
+
+        $communicator->sendRequest('GET', 'Users');
+
+        $this->assertSame('/api/v6/users.json', $history[0]['request']->getUri()->getPath());
+    }
 }

@@ -1,7 +1,5 @@
 <?php
 
-declare(strict_types=1);
-
 namespace Daktela\DaktelaV6\Exception;
 
 use Exception;

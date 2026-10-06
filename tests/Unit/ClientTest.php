@@ -532,4 +532,16 @@ class ClientTest extends TestCase
             'update' => [(new UpdateRequest('..\\x'))->setObjectName('a')],
         ];
     }
+
+    public function testReadAllWithSkipStopsAtReportedTotal(): void
+    {
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->once())
+            ->method('sendRequest')
+            ->willReturn(new Response([['id' => 3], ['id' => 4]], 4, [], 200));
+        $client = $this->createClient($communicator);
+        $request = (new ReadRequest('Users'))->setRequestType(ReadRequest::TYPE_ALL)->setTake(2)->setSkip(2);
+
+        $this->assertCount(2, $client->execute($request)->getData());
+    }
 }

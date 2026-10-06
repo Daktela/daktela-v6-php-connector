@@ -143,4 +143,12 @@ class ExceptionTest extends TestCase
         $this->assertSame(404, $exception->getHttpStatus());
         $this->assertSame(['Not found'], $exception->getApiErrors());
     }
+
+    public function testRequestExceptionAcceptsLooselyTypedArguments(): void
+    {
+        $exception = new RequestException(42, '404');
+
+        $this->assertSame('42', $exception->getMessage());
+        $this->assertSame(404, $exception->getCode());
+    }
 }

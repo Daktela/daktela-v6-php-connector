@@ -33,7 +33,7 @@ class FormatHelper
             return null;
         }
 
-        $number = preg_replace('/[\s\-().\/]/u', '', $number);
+        $number = preg_replace('/[\s\-().\/]/', '', $number) ?? $number;
         if ($number === '') {
             return $number;
         }

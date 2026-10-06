@@ -21,7 +21,7 @@ All notable changes to this project are documented in this file. The project fol
 - Accepted `"0"` as an object name for read, update, and delete requests.
 - Made `Client::execute()` send the request when a request is flagged as executed but has no stored response, instead of failing with a `TypeError`.
 - Clamped a negative numeric `Retry-After` header to zero instead of passing it to `sleep()`.
-- Kept the path of an instance URL such as `https://example.com/daktela/` in request URLs.
+- Kept the path of an instance URL such as `https://example.com/daktela/` in request URLs. An instance URL that already ends with `/api/v6` still works.
 - Made `addAttributes()` keep object values and integer keys instead of dropping or rejecting them.
 - Stripped common separators (`-`, `(`, `)`, `.`, `/`) in `FormatHelper::getNormalizedPhoneNumber()`, and returned an empty string unchanged instead of `00420`.
 - Corrected the `CreateRequest` and `UpdateRequest` docblock examples, which overwrote the `number` attribute.
@@ -39,6 +39,8 @@ All notable changes to this project are documented in this file. The project fol
 
 - Each `addFilter()` and `addFilterFromArray()` call is now combined with the previous filters using AND logic, as documented. Two consecutive OR groups now produce `(A OR B) AND (C OR D)` instead of `A OR B OR C OR D`.
 - Read-all requests and `PaginatedIterator` now start at the request's `setSkip()` offset instead of 0.
+- Object names and relations containing `/` or `\` now throw `RequestException` instead of being sent. Read relations with `RequestFactory::buildReadRelationRequest()` or `setRelation()` instead of embedding them in the object name.
+- With query parameter authentication, `RequestException::getPrevious()` is now `null` for HTTP and connection errors. Use `getHttpStatus()`, `getResponseBody()`, and `getApiErrors()` instead of `getPrevious()->getResponse()`.
 - `ARequest::getResponse()` now returns `?Response` and returns `null` before a response is stored.
 - Raised the development-only PHPStan constraint from 0.12 to 2.x and added a level 5 static analysis job to CI.
 

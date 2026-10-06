@@ -55,4 +55,9 @@ class FormatHelperTest extends TestCase
     {
         self::assertSame('', FormatHelper::getNormalizedPhoneNumber(' '));
     }
+
+    public function testInvalidUtf8DoesNotFail(): void
+    {
+        self::assertStringStartsWith('00420773', FormatHelper::getNormalizedPhoneNumber("773\xff794"));
+    }
 }

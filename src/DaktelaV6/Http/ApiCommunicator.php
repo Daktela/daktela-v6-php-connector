@@ -39,7 +39,7 @@ class ApiCommunicator
     /** @var string[] HTTP methods that can be repeated without changing the result */
     private const IDEMPOTENT_METHODS = ['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'];
     /** @var int[] cURL error numbers raised before the request is sent (resolve/connect/TLS handshake failures) */
-    private const CURL_ERRORS_BEFORE_SEND = [5, 6, 7, 35];
+    private const CURL_ERRORS_BEFORE_SEND = [6, 7, 35];
     /** @var array static variable containing all singleton instances of the transport class */
     private static $singletons = [];
     /** @var string URL of the Daktela instance */
@@ -389,7 +389,9 @@ class ApiCommunicator
             $headers['X-AUTH-TOKEN'] = $this->accessToken;
         }
 
+        // An instance URL that already ends with the API namespace is accepted, as before
         $basePath = rtrim((string)parse_url((string)self::normalizeUrl($this->baseUrl), PHP_URL_PATH), '/');
+        $basePath = (string)preg_replace('#/api/v6$#i', '', $basePath);
         $requestUri = $basePath . self::API_NAMESPACE . lcfirst($apiEndpoint) . ".json?" . http_build_query($queryParams);
         $body = $data !== null ? Utils::jsonEncode($data) : null;
 

@@ -220,7 +220,7 @@ class Client
             //If returned less than take, it is the last page
             if (count($currentData) < $request->getTake()
                 || ($currentResponse->getTotal() > 0
-                    && count($data) >= $currentResponse->getTotal())
+                    && $request->getSkip() + count($data) >= $currentResponse->getTotal())
             ) {
                 return $response;
             }

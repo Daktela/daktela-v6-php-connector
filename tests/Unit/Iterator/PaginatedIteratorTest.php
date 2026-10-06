@@ -431,14 +431,16 @@ class PaginatedIteratorTest extends TestCase
 
     public function testSkippingErrorsStopsAtReportedTotal(): void
     {
-        $client = $this->createMockClient([
-            $this->createErrorResponse(4),
-            $this->createErrorResponse(4),
-            $this->createErrorResponse(4),
-        ]);
+        $history = [];
+        $handlerStack = HandlerStack::create(new MockHandler(array_fill(0, 5, $this->createErrorResponse(4))));
+        $handlerStack->push(\GuzzleHttp\Middleware::history($history));
+        $client = new Client('https://test' . uniqid() . '.com', 'token');
+        $client->getApiCommunicator()->setHttpClient(new GuzzleClient(['handler' => $handlerStack]));
         $iterator = new PaginatedIterator($client, new ReadRequest('Users'), pageSize: 2, stopOnError: false);
 
         $this->assertSame([], iterator_to_array($iterator, false));
+        $this->assertCount(2, $history);
+        $this->assertTrue($iterator->hasStoppedOnError());
     }
 
     public function testPagesStopsOnPersistentErrorsWithUnknownTotal(): void

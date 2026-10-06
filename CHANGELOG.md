@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file. The project fol
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-10-06
+
 ### Security
 
 - Encoded object names and relation names as single URL path segments, and rejected values that could address a different endpoint: empty values, dot segments (also percent-encoded), and values containing `/`, `\`, or NUL. Model names containing dot segments are rejected as well. Previously, an object name such as `../users/admin` sent `DELETE /api/v6/users/admin.json` against a different endpoint.
@@ -44,6 +46,8 @@ All notable changes to this project are documented in this file. The project fol
 - `ARequest::getResponse()` now returns `?Response` and returns `null` before a response is stored.
 - Raised the development-only PHPStan constraint from 0.12 to 2.x and added a level 5 static analysis job to CI.
 
+Public methods only gained optional parameters, and `ARequest::getResponse()` widened its return type. Subclasses that override `ARequestWithAttributes::addAttributes()` must add the optional `bool $includeNull = false` parameter. Review the Changed section if you combine several OR filter groups, embed relations in object names, or read `getPrevious()` with query parameter authentication.
+
 ## [2.5.0] - 2026-08-19
 
 ### Security
@@ -74,5 +78,6 @@ All notable changes to this project are documented in this file. The project fol
 
 No public method signatures were changed in this release. The dependency minimums in the Security section are the only compatibility-sensitive upgrade requirement.
 
-[Unreleased]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.5.0...HEAD
+[Unreleased]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.6.0...HEAD
+[2.6.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.5.0...2.6.0
 [2.5.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.4.2...2.5.0

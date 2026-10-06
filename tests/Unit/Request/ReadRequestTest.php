@@ -333,4 +333,18 @@ class ReadRequestTest extends TestCase
             $request->getFilters()['filters'][1]['filters'][1]
         );
     }
+
+    public function testConsecutiveOrGroupsAreCombinedWithAnd(): void
+    {
+        $request = (new ReadRequest('Users'))
+            ->addFilterFromArray(['logic' => 'or', 'filters' => [['a', 'eq', '1'], ['b', 'eq', '1']]])
+            ->addFilterFromArray(['logic' => 'or', 'filters' => [['c', 'eq', '1'], ['d', 'eq', '1']]]);
+
+        $filters = $request->getFilters();
+        $this->assertSame('and', $filters['logic']);
+        $this->assertCount(2, $filters['filters']);
+        $this->assertSame('or', $filters['filters'][0]['logic']);
+        $this->assertSame('or', $filters['filters'][1]['logic']);
+        $this->assertSame('d', $filters['filters'][1]['filters'][1]['field']);
+    }
 }

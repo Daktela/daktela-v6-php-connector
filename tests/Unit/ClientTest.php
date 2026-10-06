@@ -544,4 +544,23 @@ class ClientTest extends TestCase
 
         $this->assertCount(2, $client->execute($request)->getData());
     }
+
+    public function testReadAllCompletingOnLastAllowedPageIsNotTruncated(): void
+    {
+        $calls = 0;
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->exactly(Client::READ_LIMIT))
+            ->method('sendRequest')
+            ->willReturnCallback(function () use (&$calls): Response {
+                $calls++;
+                return new Response([['id' => $calls]], Client::READ_LIMIT, [], 200);
+            });
+        $client = $this->createClient($communicator);
+        $request = (new ReadRequest('Users'))->setRequestType(ReadRequest::TYPE_ALL)->setTake(1);
+
+        $response = $client->execute($request);
+
+        $this->assertCount(Client::READ_LIMIT, $response->getData());
+        $this->assertFalse($response->hasErrors());
+    }
 }

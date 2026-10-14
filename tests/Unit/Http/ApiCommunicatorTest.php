@@ -12,14 +12,17 @@ use Daktela\DaktelaV6\Http\RateLimitConfig;
 use Daktela\DaktelaV6\Http\RetryConfig;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
+use GuzzleHttp\Exception\BadResponseException;
 use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\RequestException as GuzzleRequestException;
+use GuzzleHttp\Exception\TooManyRedirectsException;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
+use GuzzleHttp\Psr7\Utils as Psr7Utils;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\RequestInterface;
 use Psr\Log\LoggerInterface;
@@ -1212,15 +1215,19 @@ class ApiCommunicatorTest extends TestCase
         return [
             'another host' => ['https://other.example.org/api/v6/users.json'],
             'downgrade to http' => ['http://example.com/api/v6/users.json'],
+            'another port' => ['https://example.com:8443/api/v6/users.json'],
         ];
     }
 
-    public function testDefaultClientKeepsXAuthTokenOnSameHostRedirect(): void
+    /**
+     * @dataProvider sameInstanceRedirects
+     */
+    public function testDefaultClientKeepsXAuthTokenOnSameInstanceRedirect(string $instance, string $location): void
     {
         $requests = [];
-        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator = new ApiCommunicator($instance, 'SECRET');
         $this->useDefaultClientWithMockHandler($communicator, [
-            new GuzzleResponse(302, ['Location' => 'https://example.com/api/v6/users.json?moved=1']),
+            new GuzzleResponse(302, ['Location' => $location]),
             $this->okResponse(),
         ], $requests);
 
@@ -1228,6 +1235,171 @@ class ApiCommunicatorTest extends TestCase
 
         $this->assertCount(2, $requests);
         $this->assertSame('SECRET', $requests[1]->getHeaderLine('X-AUTH-TOKEN'));
+    }
+
+    public static function sameInstanceRedirects(): array
+    {
+        return [
+            'same host' => ['https://example.com', 'https://example.com/api/v6/users.json?moved=1'],
+            'explicit default port' => ['https://example.com', 'https://example.com:443/api/v6/users.json'],
+            'upgrade to https' => ['http://example.com', 'https://example.com/api/v6/users.json'],
+        ];
+    }
+
+    public function testDefaultClientKeepsXAuthTokenOffAfterRedirectLeftInstance(): void
+    {
+        $requests = [];
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $this->useDefaultClientWithMockHandler($communicator, [
+            new GuzzleResponse(307, ['Location' => 'https://other.example.org/x']),
+            new GuzzleResponse(308, ['Location' => 'https://example.com/api/v6/users/admin.json']),
+            $this->okResponse(),
+        ], $requests);
+
+        $communicator->sendRequest('PUT', 'Users/alice', [], ['title' => 'Alice']);
+
+        $this->assertCount(3, $requests);
+        $this->assertSame('SECRET', $requests[0]->getHeaderLine('X-AUTH-TOKEN'));
+        $this->assertFalse($requests[1]->hasHeader('X-AUTH-TOKEN'));
+        $this->assertFalse($requests[2]->hasHeader('X-AUTH-TOKEN'));
+    }
+
+    /**
+     * @dataProvider tokensWithLineBreakAndBlanks
+     */
+    public function testTokenWithLineBreakAndBlanksIsNotLeaked(int $method, string $token): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', $token);
+        $communicator->setAuthenticationMethod($method);
+        $communicator->setHttpClient($this->createMockClient([]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertStringNotContainsString('SECRET', $ex->getMessage());
+        }
+    }
+
+    public static function tokensWithLineBreakAndBlanks(): array
+    {
+        $cases = [];
+        foreach (['X-AUTH-TOKEN' => ApiCommunicator::AUTHENTICATION_METHOD_HEADER, 'Bearer' => ApiCommunicator::AUTHENTICATION_METHOD_BEARER] as $name => $method) {
+            $cases["$name, trailing newline and space"] = [$method, "SECRET\n "];
+            $cases["$name, leading space"] = [$method, " SECRET\n"];
+            $cases["$name, trailing newline and tab"] = [$method, "SECRET\n\t"];
+        }
+
+        return $cases;
+    }
+
+    public function testUnreadableResponseBodyDoesNotBreakErrorHandling(): void
+    {
+        $body = Psr7Utils::streamFor('partial SECRET');
+        $body->detach();
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(new GuzzleRequestException(
+            'cURL error 56: Recv failure',
+            new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET']),
+            new GuzzleResponse(200, [], $body)
+        ));
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame('cURL error 56: Recv failure', $ex->getMessage());
+            $this->assertSame('', (string)$ex->getPrevious()->getResponse()->getBody());
+        }
+    }
+
+    public function testLargePartialResponseBodyIsNotCopiedIntoPreviousException(): void
+    {
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(new GuzzleRequestException(
+            'cURL error 56: Recv failure',
+            new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET']),
+            new GuzzleResponse(200, [], str_repeat('x', 2 * 1024 * 1024))
+        ));
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame(0, $ex->getPrevious()->getResponse()->getBody()->getSize());
+        }
+    }
+
+    public function testPreviousExceptionRedactsTokenInResponseHeadersAndHandlerContext(): void
+    {
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(new ConnectException(
+            'Connection reset',
+            new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET']),
+            null,
+            ['request_header' => "GET / HTTP/1.1\r\nX-AUTH-TOKEN: SECRET\r\n"]
+        ));
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertStringNotContainsString('SECRET', $ex->getPrevious()->getHandlerContext()['request_header']);
+        }
+
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(401, ['X-Echo' => 'SECRET'], '{}'),
+        ]));
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame('***', $ex->getPrevious()->getResponse()->getHeaderLine('X-Echo'));
+        }
+    }
+
+    public function testPreviousExceptionKeepsClassAndMessageOfRedirectErrors(): void
+    {
+        $request = new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET']);
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(new TooManyRedirectsException(
+            'Will not follow more than 5 redirects',
+            $request,
+            new GuzzleResponse(302, ['Location' => '/again'])
+        ));
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertInstanceOf(TooManyRedirectsException::class, $ex->getPrevious());
+            $this->assertSame('Will not follow more than 5 redirects', $ex->getPrevious()->getMessage());
+        }
+
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(new BadResponseException(
+            'Redirect URI, ftp://example.com, does not use one of the allowed redirect protocols: http, https',
+            $request,
+            new GuzzleResponse(302, ['Location' => 'ftp://example.com'])
+        ));
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertStringStartsWith('Redirect URI, ftp://example.com', $ex->getMessage());
+            $this->assertInstanceOf(BadResponseException::class, $ex->getPrevious());
+            $this->assertStringStartsWith('Redirect URI, ftp://example.com', $ex->getPrevious()->getMessage());
+        }
     }
 
     /**

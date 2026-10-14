@@ -11,12 +11,14 @@ use Daktela\DaktelaV6\Response\Response;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\BadResponseException;
+use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\InvalidArgumentException;
 use GuzzleHttp\Exception\RequestException as GuzzleRequestException;
+use GuzzleHttp\Exception\ServerException;
+use GuzzleHttp\Exception\TooManyRedirectsException;
 use GuzzleHttp\HandlerStack;
-use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Uri;
 use GuzzleHttp\Psr7\Utils as Psr7Utils;
@@ -49,6 +51,18 @@ class ApiCommunicator
     private const IDEMPOTENT_METHODS = ['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'];
     /** @var int[] cURL error numbers raised before the request is sent (resolve/connect/TLS handshake failures) */
     private const CURL_ERRORS_BEFORE_SEND = [6, 7, 35];
+    /** @var string[] Guzzle exceptions that sanitize() copies with their own class */
+    private const GUZZLE_REQUEST_EXCEPTIONS = [
+        GuzzleRequestException::class,
+        BadResponseException::class,
+        ClientException::class,
+        ServerException::class,
+        TooManyRedirectsException::class,
+    ];
+    /** @var int Largest response body, in bytes, copied into an exception chained as the previous exception */
+    private const COPIED_BODY_LIMIT = 1048576;
+    /** @var string Request option shared by the hops of a redirected request; records that one left the instance */
+    private const LEFT_INSTANCE_OPTION = 'daktela_left_instance';
     /** @var string Health check error used when the API answers without identifying the token's user */
     private const TOKEN_NOT_ACCEPTED_ERROR = 'The access token was not accepted: the API did not identify a user.';
     /** @var string Health check error used for an HTTP error response that carries no API error */
@@ -266,8 +280,8 @@ class ApiCommunicator
     {
         $body = $this->redact((string)$response->getBody());
         $decoded = json_decode($body);
-        $apiErrors = is_object($decoded) ? $this->redactErrors($this->normalizeErrors($decoded->error ?? null)) : [];
-        $sanitized = $this->sanitize($ex);
+        $apiErrors = is_object($decoded) ? $this->redactValues($this->normalizeErrors($decoded->error ?? null)) : [];
+        $sanitized = $this->sanitize($ex, $body);
         $message = $sanitized === null ? $this->redact($ex->getMessage()) : $sanitized->getMessage();
         $previous = $this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY ? null : $sanitized;
 
@@ -369,38 +383,74 @@ class ApiCommunicator
      * response body. The message of an HTTP error response is rebuilt from the redacted body, because the
      * client's message summarizes the raw body and its truncation can cut the token.
      * @param Throwable $ex exception raised by the HTTP client
+     * @param string|null $redactedBody response body that was already read and redacted, or null to read it
      * @return Throwable|null copy without the token, or null when the exception cannot be copied
      */
-    private function sanitize(Throwable $ex): ?Throwable
+    private function sanitize(Throwable $ex, ?string $redactedBody = null): ?Throwable
     {
         if ($ex instanceof ConnectException) {
             return new ConnectException(
                 $this->redact($ex->getMessage()),
                 $this->withoutCredentials($ex->getRequest()),
                 null,
-                $ex->getHandlerContext()
+                $this->redactValues($ex->getHandlerContext())
             );
         }
         if ($ex instanceof GuzzleRequestException) {
             $request = $this->withoutCredentials($ex->getRequest());
+            $context = $this->redactValues($ex->getHandlerContext());
             $response = $ex->getResponse();
-            if ($response !== null) {
-                $response = $response->withBody(Psr7Utils::streamFor($this->redact((string)$response->getBody())));
+            if ($response === null) {
+                return new GuzzleRequestException($this->redact($ex->getMessage()), $request, null, null, $context);
             }
-            if ($ex instanceof BadResponseException && $response !== null) {
-                return GuzzleRequestException::create($request, $response, null, $ex->getHandlerContext());
+            $response = $this->withoutToken($response, $redactedBody);
+            if ($ex instanceof BadResponseException && $response->getStatusCode() >= 400) {
+                return GuzzleRequestException::create($request, $response, null, $context);
             }
+            $class = in_array(get_class($ex), self::GUZZLE_REQUEST_EXCEPTIONS, true)
+                ? get_class($ex)
+                : GuzzleRequestException::class;
 
-            return new GuzzleRequestException(
-                $this->redact($ex->getMessage()),
-                $request,
-                $response,
-                null,
-                $ex->getHandlerContext()
-            );
+            return new $class($this->redact($ex->getMessage()), $request, $response, null, $context);
         }
 
         return $this->redact($ex->getMessage()) === $ex->getMessage() ? $ex : null;
+    }
+
+    /**
+     * Removes the access token from a response: it is redacted from the header values and the body.
+     * @param ResponseInterface $response response received by the HTTP client
+     * @param string|null $redactedBody body that was already read and redacted, or null to read it
+     * @return ResponseInterface response without the access token
+     */
+    private function withoutToken(ResponseInterface $response, ?string $redactedBody): ResponseInterface
+    {
+        $redactedBody ??= $this->readRedactedBody($response);
+        foreach ($response->getHeaders() as $name => $values) {
+            $response = $response->withHeader($name, array_map(fn (string $value): string => $this->redact($value), $values));
+        }
+
+        return $response->withBody(Psr7Utils::streamFor($redactedBody));
+    }
+
+    /**
+     * Reads and redacts a response body for a copied exception. An unreadable body, or one that is unknown
+     * in size or too large, is left out, e.g. the partial body of a large download that failed.
+     * @param ResponseInterface $response response received by the HTTP client
+     * @return string redacted body, or an empty string when it is left out
+     */
+    private function readRedactedBody(ResponseInterface $response): string
+    {
+        $body = $response->getBody();
+        try {
+            if (!$body->isReadable() || ($body->getSize() ?? PHP_INT_MAX) > self::COPIED_BODY_LIMIT) {
+                return '';
+            }
+
+            return $this->redact((string)$body);
+        } catch (\RuntimeException $ex) {
+            return '';
+        }
     }
 
     /**
@@ -417,24 +467,24 @@ class ApiCommunicator
     }
 
     /**
-     * Redacts the access token from decoded API errors, which may spell it with JSON escapes the raw body
-     * redaction cannot match.
-     * @param array $errors errors in the shape returned by normalizeErrors()
-     * @return array errors with every string value redacted
+     * Redacts the access token from every string in a decoded structure, such as API errors, which may
+     * spell the token with JSON escapes the raw body redaction cannot match, or a handler context.
+     * @param array $values decoded values, possibly nested in lists, maps and objects
+     * @return array values with every string redacted
      */
-    private function redactErrors(array $errors): array
+    private function redactValues(array $values): array
     {
-        foreach ($errors as $key => $error) {
-            if (is_string($error)) {
-                $errors[$key] = $this->redact($error);
-            } elseif (is_array($error)) {
-                $errors[$key] = $this->redactErrors($error);
-            } elseif (is_object($error)) {
-                $errors[$key] = (object)$this->redactErrors(get_object_vars($error));
+        foreach ($values as $key => $value) {
+            if (is_string($value)) {
+                $values[$key] = $this->redact($value);
+            } elseif (is_array($value)) {
+                $values[$key] = $this->redactValues($value);
+            } elseif (is_object($value)) {
+                $values[$key] = (object)$this->redactValues(get_object_vars($value));
             }
         }
 
-        return $errors;
+        return $values;
     }
 
     /**
@@ -526,6 +576,12 @@ class ApiCommunicator
         }
         $headers = ["User-Agent" => $userAgent, "Content-Type" => "application/json"];
 
+        if ($this->authenticationMethod !== self::AUTHENTICATION_METHOD_QUERY
+            && preg_match('/[\x00-\x08\x0A-\x1F\x7F]/', $this->accessToken) === 1
+        ) {
+            // Not a valid header value: Guzzle's error would quote the header value, trimmed, so redact() could miss it
+            throw new RequestException('The access token contains a line break or another control character.');
+        }
         if ($this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY) {
             $queryParams['accessToken'] = $this->accessToken;
         } elseif ($this->authenticationMethod === self::AUTHENTICATION_METHOD_BEARER) {
@@ -575,7 +631,7 @@ class ApiCommunicator
             }
         }
 
-        $errors = is_object($responseBody) ? $this->redactErrors($this->normalizeErrors($responseBody->error ?? null)) : [];
+        $errors = is_object($responseBody) ? $this->redactValues($this->normalizeErrors($responseBody->error ?? null)) : [];
 
         if (!isset($responseBody->result)) {
             $this->logger?->debug('API response received (no result)', [
@@ -606,13 +662,30 @@ class ApiCommunicator
     {
         $instance = new Uri((string)self::normalizeUrl($this->baseUrl));
         $handler = HandlerStack::create();
-        // Guzzle removes the Authorization header when a redirect leaves the origin, but not X-AUTH-TOKEN.
-        // Placed after allow_redirects, the middleware also sees every redirected request.
-        $handler->after('allow_redirects', Middleware::mapRequest(
-            static fn (RequestInterface $request): RequestInterface => self::leavesInstance($instance, $request->getUri())
-                ? $request->withoutHeader('X-AUTH-TOKEN')
-                : $request
-        ), 'drop_token_outside_instance');
+        // Guzzle removes the Authorization header once a redirect leaves the origin, but not X-AUTH-TOKEN.
+        // Every hop is built from the request that still carries the token, so the hops share a state object:
+        // the outer middleware creates it, and the one inside allow_redirects sees every hop and, once a hop
+        // has left the instance, keeps the token off the rest of the chain.
+        $handler->before('allow_redirects', static function (callable $next): callable {
+            return static function (RequestInterface $request, array $options) use ($next) {
+                $options[self::LEFT_INSTANCE_OPTION] = new \stdClass();
+
+                return $next($request, $options);
+            };
+        }, 'track_redirects_leaving_instance');
+        $handler->after('allow_redirects', static function (callable $next) use ($instance): callable {
+            return static function (RequestInterface $request, array $options) use ($next, $instance) {
+                $state = $options[self::LEFT_INSTANCE_OPTION] ?? new \stdClass();
+                if (self::leavesInstance($instance, $request->getUri())) {
+                    $state->left = true;
+                }
+                if (!empty($state->left)) {
+                    $request = $request->withoutHeader('X-AUTH-TOKEN');
+                }
+
+                return $next($request, $options);
+            };
+        }, 'drop_token_outside_instance');
 
         return new Client([
             'base_uri' => $instance,
@@ -623,15 +696,31 @@ class ApiCommunicator
     }
 
     /**
-     * Checks whether a request URL leaves the Daktela instance: another host, or plain HTTP from an HTTPS instance.
+     * Checks whether a request URL leaves the Daktela instance: another host, another port, or plain HTTP
+     * from an HTTPS instance. Only the upgrade from HTTP to HTTPS on the same host stays on the instance.
      * @param UriInterface $instance URL of the Daktela instance
      * @param UriInterface $target URL the request is sent to
      * @return bool true when the access token must not be sent to the URL
      */
     private static function leavesInstance(UriInterface $instance, UriInterface $target): bool
     {
-        return strcasecmp($target->getHost(), $instance->getHost()) !== 0
-            || ($instance->getScheme() === 'https' && $target->getScheme() !== 'https');
+        if (strcasecmp($target->getHost(), $instance->getHost()) !== 0) {
+            return true;
+        }
+        if (strcasecmp($target->getScheme(), $instance->getScheme()) !== 0) {
+            return strcasecmp($target->getScheme(), 'https') !== 0;
+        }
+
+        return self::effectivePort($target) !== self::effectivePort($instance);
+    }
+
+    /**
+     * @param UriInterface $uri URL
+     * @return int|null port of the URL, including the default port of its scheme
+     */
+    private static function effectivePort(UriInterface $uri): ?int
+    {
+        return $uri->getPort() ?? (['http' => 80, 'https' => 443][strtolower($uri->getScheme())] ?? null);
     }
 
     /**

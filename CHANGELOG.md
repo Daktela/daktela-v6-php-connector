@@ -10,6 +10,10 @@ All notable changes to this project are documented in this file. The project fol
 - Replaced the truncated body summary in messages of other Guzzle exceptions with the summary of the redacted body, so a token cut at the 120-byte limit no longer leaves a fragment.
 - Redacted the access token in the keys of decoded API errors, not only in their values.
 
+### Added
+
+- `Client::login()` and `ApiCommunicator::login()` to start a session with a username and password instead of a static access token. The connector refreshes the short-lived access token before it expires and after the server rejects it, and logs in again when the session has ended. A `TokenStore` keeps the session across processes; `InMemoryTokenStore` and the `TokenSet` value object are included. Accounts with two-factor authentication cannot log in this way.
+
 ### Fixed
 
 - Kept the class of a custom subclass of a Guzzle exception in the copy chained as the previous exception. A subclass whose constructor takes other arguments falls back to the nearest Guzzle class.

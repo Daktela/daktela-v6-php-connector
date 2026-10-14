@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Daktela\DaktelaV6;
 
+use Daktela\DaktelaV6\Auth\TokenStore;
 use Daktela\DaktelaV6\Exception\NotFoundException;
 use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Exception\UnknownRequestTypeException;
@@ -52,6 +53,26 @@ class Client
     public function __construct(string $instance, string $accessToken, ?ApiCommunicator $apiCommunicator = null)
     {
         $this->apiCommunicator = $apiCommunicator ?? ApiCommunicator::getInstance($instance, $accessToken);
+    }
+
+    /**
+     * Creates a client that logs in with a username and password instead of using a static access token.
+     * It gets its own ApiCommunicator, which keeps the session and refreshes it; see ApiCommunicator::login().
+     * To configure the transport (timeout, retries, ...) before the login, create the ApiCommunicator yourself,
+     * call its login() method, and pass it to the constructor.
+     * @param string $instance URL of the Daktela instance the client is connecting to
+     * @param string $username name of the Daktela user
+     * @param string $password password of the Daktela user
+     * @param TokenStore|null $tokenStore store that keeps the session tokens between processes, or null
+     * @return Client client with a logged-in session
+     * @throws RequestException when the login fails
+     */
+    public static function login(string $instance, string $username, string $password, ?TokenStore $tokenStore = null): self
+    {
+        $apiCommunicator = new ApiCommunicator($instance, '');
+        $apiCommunicator->login($username, $password, $tokenStore);
+
+        return new self($instance, '', $apiCommunicator);
     }
 
     /**

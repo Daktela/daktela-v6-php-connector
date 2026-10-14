@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Daktela\Tests\Unit;
 
+use Daktela\DaktelaV6\Auth\InMemoryTokenStore;
+use Daktela\DaktelaV6\Auth\TokenSet;
 use Daktela\DaktelaV6\Client;
 use Daktela\DaktelaV6\Exception\NotFoundException;
 use Daktela\DaktelaV6\Exception\RequestException;
@@ -349,6 +351,23 @@ class ClientTest extends TestCase
 
         $this->assertSame([['id' => 1]], $response->getData());
         $this->assertFalse($response->hasErrors());
+    }
+
+    public function testLoginCreatesClientWithOwnLoggedInCommunicator(): void
+    {
+        $accessToken = \Daktela\Tests\Unit\Auth\TokenSetTest::jwt(time() + 3600);
+        $store = new InMemoryTokenStore();
+        $store->save(TokenSet::fromTokens($accessToken, \Daktela\Tests\Unit\Auth\TokenSetTest::jwt(time() + 86400)));
+
+        $client = Client::login('https://example.com', 'api', 'password', $store);
+
+        $communicator = $client->getApiCommunicator();
+        $this->assertNotSame(ApiCommunicator::getInstance('https://example.com', ''), $communicator);
+        $property = new \ReflectionProperty($communicator, 'accessToken');
+        if (PHP_VERSION_ID < 80100) {
+            $property->setAccessible(true);
+        }
+        $this->assertSame($accessToken, $property->getValue($communicator));
     }
 
     public function testPingDelegatesToCommunicator(): void

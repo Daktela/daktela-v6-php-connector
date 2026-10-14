@@ -265,9 +265,54 @@ The access token is replaced with `***` in exception messages, the stored respon
 Use a static API token for integrations. An administrator creates it in Manage → Users → [user detail] → Persistent API tokens, or through the `apiToken` API endpoint.
 
 - **Static tokens expire.** Since Daktela 2025.2, each static token has an expiration date (up to 720 days) and can be extended automatically on each use ("Extend with each use"). With an expired, deactivated, or deleted token, or a token of a deactivated user, API endpoints answer HTTP 401 and the health check reports the token as not accepted. Check the expiration date when you set up an integration, and monitor the token with `healthCheck()` (see [Health Check](#health-check)).
-- **Dynamic tokens are not refreshed.** The access token returned by `login.json` is a short-lived JWT (typically valid for one hour), paired with a refresh token. The connector does not log in or refresh tokens, so a dynamic token stops working when it expires. Use a static token for long-running integrations.
+- **Dynamic tokens expire quickly.** The access token returned by `login.json` is a short-lived JWT (typically valid for one hour), paired with a refresh token. If you pass such a token to the client yourself, the connector cannot refresh it. Let the connector log in instead (see [Logging In with a Username and Password](#logging-in-with-a-username-and-password)), or use a static token.
 
 Integrations that use a static token need no changes when Daktela is updated to a version that uses JWT sessions for the web interface.
+
+### Logging In with a Username and Password
+
+Instead of using a static token, the connector can log in with a username and password. It refreshes the short-lived access token before it expires, and logs in again when the session has ended:
+
+```php
+use Daktela\DaktelaV6\Client;
+
+$client = Client::login($instance, $username, $password);
+```
+
+Each login starts a new session on the Daktela server. To reuse one session across processes, pass a `TokenStore` that keeps the tokens in your cache or database:
+
+```php
+use Daktela\DaktelaV6\Auth\TokenSet;
+use Daktela\DaktelaV6\Auth\TokenStore;
+use Daktela\DaktelaV6\Client;
+
+final class FileTokenStore implements TokenStore
+{
+    public function __construct(private string $path)
+    {
+    }
+
+    public function load(): ?TokenSet
+    {
+        $data = is_file($this->path) ? json_decode((string)file_get_contents($this->path), true) : null;
+
+        return is_array($data) ? TokenSet::fromArray($data) : null;
+    }
+
+    public function save(TokenSet $tokens): void
+    {
+        file_put_contents($this->path, json_encode($tokens->toArray()), LOCK_EX);
+        chmod($this->path, 0600);
+    }
+}
+
+$client = Client::login($instance, $username, $password, new FileTokenStore('/var/lib/myapp/daktela-tokens.json'));
+```
+
+- The password is kept in memory to log in again. The connector never stores it.
+- Refresh tokens are long-lived credentials. Store them as securely as passwords.
+- Accounts with two-factor authentication cannot log in this way. Use a static token for them.
+- To configure the transport before the login (timeout, retries, ...), call `login()` on your own `ApiCommunicator` and pass it to the `Client` constructor.
 
 ## Authentication Methods
 

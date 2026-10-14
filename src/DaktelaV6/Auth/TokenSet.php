@@ -1,0 +1,130 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Daktela\DaktelaV6\Auth;
+
+use InvalidArgumentException;
+
+/**
+ * Access and refresh token of a session started by logging in with a username and password.
+ * Both are JWTs; their expiry is read from the `exp` claim without verifying the signature,
+ * which only the Daktela server can do.
+ * @package Daktela\DaktelaV6\Auth
+ */
+final class TokenSet
+{
+    private string $accessToken;
+    private string $refreshToken;
+    private ?int $accessTokenExpiresAt;
+    private ?int $refreshTokenExpiresAt;
+
+    private function __construct(
+        string $accessToken,
+        string $refreshToken,
+        ?int $accessTokenExpiresAt,
+        ?int $refreshTokenExpiresAt
+    ) {
+        if ($accessToken === '' || $refreshToken === '') {
+            throw new InvalidArgumentException('Access token and refresh token must not be empty');
+        }
+        $this->accessToken = $accessToken;
+        $this->refreshToken = $refreshToken;
+        $this->accessTokenExpiresAt = $accessTokenExpiresAt;
+        $this->refreshTokenExpiresAt = $refreshTokenExpiresAt;
+    }
+
+    /**
+     * @param string $accessToken access token returned by the API
+     * @param string $refreshToken refresh token returned by the API
+     * @return self tokens with the expiry read from their `exp` claims
+     */
+    public static function fromTokens(string $accessToken, string $refreshToken): self
+    {
+        return new self($accessToken, $refreshToken, self::expiry($accessToken), self::expiry($refreshToken));
+    }
+
+    /**
+     * Restores tokens saved with toArray(), e.g. by a TokenStore.
+     * @param array $data array returned by toArray()
+     * @return self restored tokens
+     * @throws InvalidArgumentException when the array does not contain both tokens
+     */
+    public static function fromArray(array $data): self
+    {
+        if (!is_string($data['accessToken'] ?? null) || !is_string($data['refreshToken'] ?? null)) {
+            throw new InvalidArgumentException('Saved tokens must contain accessToken and refreshToken');
+        }
+
+        return self::fromTokens($data['accessToken'], $data['refreshToken']);
+    }
+
+    /**
+     * @return array{accessToken: string, refreshToken: string} tokens to be saved, e.g. as JSON
+     */
+    public function toArray(): array
+    {
+        return ['accessToken' => $this->accessToken, 'refreshToken' => $this->refreshToken];
+    }
+
+    public function getAccessToken(): string
+    {
+        return $this->accessToken;
+    }
+
+    public function getRefreshToken(): string
+    {
+        return $this->refreshToken;
+    }
+
+    /**
+     * @return int|null Unix time the access token expires at, or null when unknown
+     */
+    public function getAccessTokenExpiresAt(): ?int
+    {
+        return $this->accessTokenExpiresAt;
+    }
+
+    /**
+     * @return int|null Unix time the refresh token expires at, or null when unknown
+     */
+    public function getRefreshTokenExpiresAt(): ?int
+    {
+        return $this->refreshTokenExpiresAt;
+    }
+
+    /**
+     * @param int $seconds margin before the expiry
+     * @param int $now current Unix time
+     * @return bool true when the access token expires within the margin; false when its expiry is unknown
+     */
+    public function accessTokenExpiresWithin(int $seconds, int $now): bool
+    {
+        return $this->accessTokenExpiresAt !== null && $this->accessTokenExpiresAt - $seconds <= $now;
+    }
+
+    /**
+     * @param int $now current Unix time
+     * @return bool true when the refresh token has expired; false when its expiry is unknown
+     */
+    public function isRefreshTokenExpired(int $now): bool
+    {
+        return $this->refreshTokenExpiresAt !== null && $this->refreshTokenExpiresAt <= $now;
+    }
+
+    /**
+     * @param string $token JWT
+     * @return int|null value of the `exp` claim, or null when the token is not a JWT with one
+     */
+    private static function expiry(string $token): ?int
+    {
+        $parts = explode('.', $token);
+        if (count($parts) !== 3) {
+            return null;
+        }
+        $json = base64_decode(strtr($parts[1], '-_', '+/'), true);
+        $payload = $json === false ? null : json_decode($json, true);
+
+        return is_array($payload) && is_int($payload['exp'] ?? null) ? $payload['exp'] : null;
+    }
+}

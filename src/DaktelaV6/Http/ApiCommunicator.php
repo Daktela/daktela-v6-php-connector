@@ -332,7 +332,6 @@ class ApiCommunicator
             // Anything else, e.g. from a logger, has frames with the payload as an argument
             throw new RequestException($this->redact($ex->getMessage()));
         }
-        $payload = [];
 
         $result = $response->getData();
         $accessToken = is_object($result) ? ($result->accessToken ?? null) : null;

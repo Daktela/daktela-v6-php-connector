@@ -597,6 +597,51 @@ class ApiCommunicatorLoginTest extends TestCase
         $this->assertCount(3, $this->history);
     }
 
+    public function testNextRequestLogsInAfterTransientLoginFailure(): void
+    {
+        $tokens = self::tokens('A');
+        $communicator = $this->communicator([new GuzzleResponse(503, [], '{}'), self::tokenResponse($tokens), self::okResponse()]);
+
+        try {
+            $communicator->login('api', 'password', null);
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame(503, $ex->getHttpStatus());
+        }
+        $communicator->sendRequest('GET', 'Users');
+
+        $this->assertSame('/api/v6/login.json', $this->request(1)->getUri()->getPath());
+        $this->assertSame($tokens[0], $this->request(2)->getHeaderLine('X-AUTH-TOKEN'));
+    }
+
+    public function testLogsInWhenRefreshTokenExpiresDuringSession(): void
+    {
+        $new = self::tokens('B');
+        // The refresh token is valid when the session starts and expires before the access token is refreshed
+        $store = new InMemoryTokenStore();
+        $store->save(TokenSet::fromTokens(TokenSetTest::jwt(time() - 10), TokenSetTest::jwt(time() + 1), self::OWNER));
+        $communicator = $this->communicator([self::tokenResponse($new), self::okResponse()]);
+        $communicator->login('api', 'password', $store);
+        sleep(2);
+
+        $communicator->sendRequest('GET', 'Users');
+
+        $this->assertSame('/api/v6/login.json', $this->request(0)->getUri()->getPath());
+        $this->assertSame($new[0], $this->request(1)->getHeaderLine('X-AUTH-TOKEN'));
+    }
+
+    public function testNotFoundDuringLoginKeepsNotFoundException(): void
+    {
+        $communicator = $this->communicator([new GuzzleResponse(404, [], '{}')]);
+
+        try {
+            $communicator->login('api', 'password', null);
+            $this->fail('Expected NotFoundException');
+        } catch (\Daktela\DaktelaV6\Exception\NotFoundException $ex) {
+            $this->assertNull($ex->getPrevious());
+        }
+    }
+
     public function testLoginResponseWithoutTokensIsRejected(): void
     {
         $communicator = $this->communicator([new GuzzleResponse(200, [], json_encode(['error' => [], 'result' => true]))]);

@@ -9,6 +9,7 @@ use Daktela\DaktelaV6\Auth\TokenSet;
 use Daktela\DaktelaV6\Client;
 use Daktela\DaktelaV6\Http\ApiCommunicator;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
 
 /**
  * Runs the health check against a real Daktela instance set by the INSTANCE environment variable. The
@@ -107,9 +108,19 @@ class HealthCheckTest extends TestCase
         // An access token the server does not accept, next to the real refresh token
         $store->save(TokenSet::fromTokens('rejected-access-token', $issued->getRefreshToken(), $issued->getOwner()));
 
-        $health = Client::login($this->instance, $username, $password, $store)->healthCheck();
+        $client = Client::login($this->instance, $username, $password, $store);
+        $messages = [];
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->method('info')->willReturnCallback(static function (string $message) use (&$messages): void {
+            $messages[] = $message;
+        });
+        $client->getApiCommunicator()->setLogger($logger);
+        $health = $client->healthCheck();
 
         $this->assertTrue($health['healthy'], $health['error'] ?? '');
         $this->assertNotSame('rejected-access-token', $store->load()->getAccessToken());
+        // The session must recover through the refresh endpoint, not by logging in again
+        $this->assertContains('Refreshed the access token of the Daktela API', $messages);
+        $this->assertNotContains('Logged in to the Daktela API', $messages);
     }
 }

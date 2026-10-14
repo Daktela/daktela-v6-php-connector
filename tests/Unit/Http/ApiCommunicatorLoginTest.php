@@ -577,6 +577,28 @@ class ApiCommunicatorLoginTest extends TestCase
         $this->assertSame($tokens[0], $this->request(1)->getHeaderLine('X-AUTH-TOKEN'));
     }
 
+    public function testTokenStoreErrorDoesNotEscapeWithTokens(): void
+    {
+        $store = new class implements TokenStore {
+            public function load(): ?TokenSet
+            {
+                return null;
+            }
+
+            public function save(TokenSet $tokens): void
+            {
+                throw new \TypeError('cache client misconfigured');
+            }
+        };
+        $tokens = self::tokens('A');
+        $communicator = $this->communicator([self::tokenResponse($tokens), self::okResponse()]);
+
+        $communicator->login('api', 'password', $store);
+        $communicator->sendRequest('GET', 'Users');
+
+        $this->assertSame($tokens[0], $this->request(1)->getHeaderLine('X-AUTH-TOKEN'));
+    }
+
     public function testHealthCheckRefreshesSessionTheServerEnded(): void
     {
         $new = self::tokens('B');

@@ -280,7 +280,7 @@ class ApiCommunicator
             );
         }
         try {
-            $this->saveTokens($this->requestTokens('login'));
+            $this->useTokens($this->requestTokens('login'), true);
         } catch (RequestException $ex) {
             if ($ex->getHttpStatus() === 400 || $ex->getHttpStatus() === 401) {
                 // Repeating a rejected login could lock the account
@@ -289,6 +289,7 @@ class ApiCommunicator
             }
             throw $ex;
         }
+        $this->saveTokens();
         $this->logger?->info('Logged in to the Daktela API', ['username' => $session->username]);
     }
 
@@ -305,7 +306,7 @@ class ApiCommunicator
             return;
         }
         try {
-            $this->saveTokens($this->requestTokens('refreshAccessToken'));
+            $this->useTokens($this->requestTokens('refreshAccessToken'), true);
         } catch (RequestException $ex) {
             if ($ex->getHttpStatus() !== 400 && $ex->getHttpStatus() !== 401) {
                 throw $ex;
@@ -313,6 +314,7 @@ class ApiCommunicator
             $this->loginWithCredentials();
             return;
         }
+        $this->saveTokens();
         $this->logger?->info('Refreshed the access token of the Daktela API');
     }
 
@@ -396,7 +398,7 @@ class ApiCommunicator
     {
         try {
             $stored = $this->session()?->tokenStore?->load();
-        } catch (\Exception $ex) {
+        } catch (\Throwable $ex) {
             $this->logger?->warning('Loading the saved login session failed; logging in', [
                 'error' => $this->redact($ex->getMessage()),
             ]);
@@ -411,16 +413,19 @@ class ApiCommunicator
     }
 
     /**
-     * Uses new tokens received from the API and saves them to the token store. When the store fails, the
-     * session continues with the tokens in memory.
-     * @param TokenSet $tokens new tokens of the session
+     * Saves the tokens of the session to the token store. When the store fails, the session continues with
+     * the tokens in memory. The tokens are read from the session rather than passed as an argument, so that
+     * no frame of an exception escaping from here, e.g. from the logger, holds them.
      */
-    private function saveTokens(TokenSet $tokens): void
+    private function saveTokens(): void
     {
-        $this->useTokens($tokens, true);
+        $session = $this->session();
+        if ($session === null || $session->tokenStore === null || $session->tokens === null) {
+            return;
+        }
         try {
-            $this->session()?->tokenStore?->save($tokens);
-        } catch (\Exception $ex) {
+            $session->tokenStore->save($session->tokens);
+        } catch (\Throwable $ex) {
             $this->logger?->warning('Saving the login session failed; it is kept in memory', [
                 'error' => $this->redact($ex->getMessage()),
             ]);

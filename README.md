@@ -260,6 +260,15 @@ try {
 
 The access token is replaced with `***` in exception messages, the stored response body and API errors, and log entries produced by the connector. With query parameter authentication, the Guzzle exception is not chained as `$ex->getPrevious()`, because its request URL contains the token; use `getHttpStatus()`, `getResponseBody()`, and `getApiErrors()` instead. The response body may contain personal data, so log it with care.
 
+## Access Tokens
+
+Use a static API token for integrations. An administrator creates it in Manage → Users → [user detail] → Persistent API tokens, or through the `apiToken` API endpoint.
+
+- **Static tokens expire.** Since Daktela 2025.2, each static token has an expiration date (up to 720 days) and can be extended automatically on each use ("Extend with each use"). An expired, deactivated, or deleted token, or a token of a deactivated user, makes the API answer HTTP 401. Check the expiration date when you set up an integration, and monitor the token with `healthCheck()` (see [Health Check](#health-check)).
+- **Dynamic tokens are not refreshed.** The access token returned by `login.json` is a short-lived JWT (typically valid for one hour), paired with a refresh token. The connector does not log in or refresh tokens, so a dynamic token stops working when it expires. Use a static token for long-running integrations.
+
+Integrations that use a static token need no changes when Daktela is updated to a version that uses JWT sessions for the web interface.
+
 ## Authentication Methods
 
 The connector supports three ways of passing the access token to the Daktela V6 API. It sends the token in exactly one of them.

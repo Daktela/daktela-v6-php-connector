@@ -45,7 +45,7 @@ There are two ways you can use the Daktela V6 PHP Connector:
 1. Instantiate the connector directly when using one set of credentials.
 2. Use the static instance accessor when working with multiple instance URL and access-token pairs.
 
-Clients with the same instance URL and access token share the same `ApiCommunicator`, including its timeout, logger, custom HTTP client, retry, and rate-limit settings. Configure those clients consistently, or give a client its own transport:
+Clients with the same instance URL and access token share the same `ApiCommunicator`, including its authentication method, timeout, SSL verification, User-Agent suffix, logger, custom HTTP client, retry, and rate-limit settings. `Client::getInstance()` also returns the same `Client` object for the same pair. A setting changed through one of them applies to all code that uses the pair. Configure those clients consistently, or give a client its own transport:
 
 ```php
 use Daktela\DaktelaV6\Client;

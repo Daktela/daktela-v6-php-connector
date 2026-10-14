@@ -56,6 +56,8 @@ class Client
 
     /**
      * Static method for using Daktela client connector as singleton.
+     * Every caller with the same URL and access token gets the same Client and the same shared
+     * ApiCommunicator, so transport settings changed by one caller apply to all of them.
      * @param string $instance URL of the Daktela instance the client is connecting to
      * @param string $accessToken access token of the connecting user
      * @return Client instance of the Daktela client class

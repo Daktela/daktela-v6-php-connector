@@ -108,6 +108,9 @@ class ApiCommunicator
 
     /**
      * Static method for using ApiCommunicator client connector as singleton.
+     * Every caller with the same URL and access token gets the same object, so its settings
+     * (authentication method, timeout, logger, retries, ...) are shared. Create an instance with
+     * `new ApiCommunicator()` for independent settings.
      * @param string $baseUrl URL of the Daktela instance
      * @param string $accessToken access token of user used for connecting to Daktela V6
      * @return ApiCommunicator instance of the transport class

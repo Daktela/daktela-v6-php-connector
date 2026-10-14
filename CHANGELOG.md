@@ -6,19 +6,20 @@ All notable changes to this project are documented in this file. The project fol
 
 ### Security
 
-- Wrapped every other exception of the HTTP client, such as an invalid redirect URL or an exception of a custom client, in a `RequestException` with the access token redacted. Previously, it reached the caller unchanged, so its message could contain the token and `ping()` and `healthCheck()` threw it.
+- Wrapped every other exception of the HTTP client, such as an invalid redirect URL or an exception of a custom client, in a `RequestException` with the access token redacted and no previous exception, because its own previous exceptions may carry the token. Previously, it reached the caller unchanged, so its message could contain the token and `ping()` and `healthCheck()` threw it.
 - Replaced the truncated body summary in messages of other Guzzle exceptions with the summary of the redacted body, so a token cut at the 120-byte limit no longer leaves a fragment.
 - Redacted the access token in the keys of decoded API errors, not only in their values.
 
 ### Added
 
-- `Client::login()` and `ApiCommunicator::login()` to start a session with a username and password instead of a static access token. The connector refreshes the short-lived access token before it expires and after the server rejects it, and logs in again when the session has ended. A `TokenStore` keeps the session across processes; `InMemoryTokenStore` and the `TokenSet` value object are included. Stored tokens record the user and instance they belong to and are not used for another one. Login and refresh requests do not follow redirects, which would send the credentials to the redirect target. Accounts with two-factor authentication cannot log in this way.
+- `Client::login()` and `ApiCommunicator::login()` to start a session with a username and password instead of a static access token. The connector refreshes the short-lived access token before it expires and after the server rejects it, and logs in again when the session has ended. A `TokenStore` keeps the session across processes; `InMemoryTokenStore` and the `TokenSet` value object are included. Stored tokens record the user and instance they belong to and are not used for another one. The password and the tokens are kept out of exception traces, also on PHP 8.0 and 8.1, and out of `var_dump()` and `print_r()` output. Login and refresh requests do not follow redirects, which would send the credentials to the redirect target. After the server rejects the credentials, no further login is sent until `login()` is called again. Accounts with two-factor authentication cannot log in this way.
 
 ### Fixed
 
 - Kept the class of a custom subclass of a Guzzle exception in the copy chained as the previous exception. A subclass whose constructor takes other arguments falls back to the nearest Guzzle class.
 - Reported an HTTP error response whose body cannot be read as a `RequestException` with an empty body, instead of a `RuntimeException`.
 - Used the `Retry-After` header of an HTTP 429 response without a `RateLimitConfig`. `RateLimitException::getRetryAfterSeconds()` previously reported the default 5 seconds.
+- Reported a request payload that cannot be encoded as JSON, such as a string that is not valid UTF-8, as a `RequestException` instead of Guzzle's `InvalidArgumentException`.
 
 ## [2.7.1] - 2026-10-14
 

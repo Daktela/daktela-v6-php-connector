@@ -1664,7 +1664,7 @@ class ApiCommunicatorTest extends TestCase
         $this->assertFalse($communicator->ping());
     }
 
-    public function testNonGuzzleExceptionWithoutTokenIsChained(): void
+    public function testNonGuzzleExceptionIsNotChained(): void
     {
         $original = new \RuntimeException('Proxy unavailable');
         $httpClient = $this->createMock(ClientInterface::class);
@@ -1677,7 +1677,8 @@ class ApiCommunicatorTest extends TestCase
             $this->fail('Expected RequestException');
         } catch (RequestException $ex) {
             $this->assertSame('Proxy unavailable', $ex->getMessage());
-            $this->assertSame($original, $ex->getPrevious());
+            // Its own previous exceptions may carry the token, so nothing is chained
+            $this->assertNull($ex->getPrevious());
         }
     }
 

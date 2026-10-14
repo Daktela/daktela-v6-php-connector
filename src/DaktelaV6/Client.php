@@ -67,10 +67,19 @@ class Client
      * @return Client client with a logged-in session
      * @throws RequestException when the login fails
      */
-    public static function login(string $instance, string $username, string $password, ?TokenStore $tokenStore = null): self
-    {
+    public static function login(
+        string $instance,
+        string $username,
+        #[\SensitiveParameter] string $password,
+        ?TokenStore $tokenStore = null
+    ): self {
+        // PHP records the current values of the parameters in the trace of every exception created below
+        // this frame, so the password and the store (which holds tokens) are removed from them
+        $secrets = [$password, $tokenStore];
+        $password = '';
+        $tokenStore = null;
         $apiCommunicator = new ApiCommunicator($instance, '');
-        $apiCommunicator->login($username, $password, $tokenStore);
+        $apiCommunicator->login($username, $secrets[0], $secrets[1]);
 
         return new self($instance, '', $apiCommunicator);
     }

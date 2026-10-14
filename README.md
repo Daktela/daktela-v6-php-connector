@@ -301,18 +301,22 @@ final class FileTokenStore implements TokenStore
 
     public function save(TokenSet $tokens): void
     {
-        file_put_contents($this->path, json_encode($tokens->toArray()), LOCK_EX);
-        chmod($this->path, 0600);
+        // tempnam() creates the file readable only by its owner; rename() replaces the old file atomically
+        $file = tempnam(dirname($this->path), 'daktela');
+        file_put_contents($file, json_encode($tokens->toArray()));
+        rename($file, $this->path);
     }
 }
 
 $client = Client::login($instance, $username, $password, new FileTokenStore('/var/lib/myapp/daktela-tokens.json'));
 ```
 
-- The password is kept in memory to log in again. The connector never stores it.
-- Saved tokens record the user and instance they belong to. `login()` logs in again instead of using tokens of another user or instance, so one store can be shared safely.
-- Login and refresh requests do not follow redirects, because a redirect would send the credentials to its target.
-- Refresh tokens are long-lived credentials. Store them as securely as passwords.
+- The password is kept in memory to log in again. The connector never stores it, and keeps it and the tokens out of exception traces and out of `var_dump()` and `print_r()` output.
+- Saved tokens record the user and instance they belong to. `login()` logs in again instead of using tokens of another user or instance, so one store can be shared safely. When the store fails, the connector logs a warning and continues with the tokens in memory.
+- Refresh tokens are long-lived credentials. Store them as securely as passwords, and use an `https://` instance URL with SSL verification enabled.
+- After the server rejects the credentials, the connector sends no further login, which could lock the account, until `login()` is called again.
+- When the server rejects the access token with HTTP 401, the connector refreshes it and sends the request once more. The server answers 401 before it processes a request, so the request is not executed twice.
+- Login and refresh requests do not follow redirects, because a redirect would send the credentials to its target. A custom HTTP client must respect the `allow_redirects` request option for this.
 - Accounts with two-factor authentication cannot log in this way. Use a static token for them.
 - To configure the transport before the login (timeout, retries, ...), call `login()` on your own `ApiCommunicator` and pass it to the `Client` constructor.
 

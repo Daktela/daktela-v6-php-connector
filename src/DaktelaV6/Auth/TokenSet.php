@@ -43,7 +43,11 @@ final class TokenSet
      * @param string|null $owner session the tokens were issued for, as `username@instance URL`
      * @return self tokens with the expiry read from their `exp` claims
      */
-    public static function fromTokens(string $accessToken, string $refreshToken, ?string $owner = null): self
+    public static function fromTokens(
+        #[\SensitiveParameter] string $accessToken,
+        #[\SensitiveParameter] string $refreshToken,
+        ?string $owner = null
+    ): self
     {
         return new self($accessToken, $refreshToken, self::expiry($accessToken), self::expiry($refreshToken), $owner);
     }
@@ -129,6 +133,15 @@ final class TokenSet
     public function isRefreshTokenExpired(int $now): bool
     {
         return $this->refreshTokenExpiresAt !== null && $this->refreshTokenExpiresAt <= $now;
+    }
+
+    /**
+     * Hides the tokens from var_dump() and print_r().
+     * @return array properties of the object with the tokens replaced
+     */
+    public function __debugInfo(): array
+    {
+        return ['accessToken' => '***', 'refreshToken' => '***'] + get_object_vars($this);
     }
 
     /**

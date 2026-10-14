@@ -22,5 +22,7 @@
         <env name="INSTANCE" value=""/>
         <env name="ACCESS_TOKEN" value=""/>
         <env name="RECORD_TYPE" value=""/>
+        <env name="LOGIN_USERNAME" value=""/>
+        <env name="LOGIN_PASSWORD" value=""/>
     </php>
 </phpunit>

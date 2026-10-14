@@ -583,10 +583,10 @@ docker run --rm -v "$PWD:/app" -w /app --entrypoint php composer:2 \
     vendor/bin/phpunit --configuration phpunit.dist.xml --testsuite Unit
 ```
 
-The full suite also contains live API integration tests. They are skipped unless all three environment variables are present:
+The full suite also contains live API integration tests, which are skipped unless their environment variables are set:
 
-- `INSTANCE`
-- `ACCESS_TOKEN`
-- `RECORD_TYPE`
+- The request tests need `INSTANCE`, `ACCESS_TOKEN`, and `RECORD_TYPE`.
+- The health check tests need `INSTANCE` and `ACCESS_TOKEN`. The Bearer test requires Daktela 31.37.0, 32.36.0, 33.14.0, or later.
+- The login test also needs `LOGIN_USERNAME` and `LOGIN_PASSWORD` of an account without two-factor authentication.
 
 CI tests supported PHP versions and enforces at least 90% line coverage for the deterministic unit suite.

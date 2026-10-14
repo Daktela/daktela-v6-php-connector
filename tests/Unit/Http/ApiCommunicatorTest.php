@@ -1644,4 +1644,162 @@ class ApiCommunicatorTest extends TestCase
 
         $this->assertSame('/api/v6/users/a%20b%3Fc%23d.json', $history[0]['request']->getUri()->getPath());
     }
+
+    public function testNonGuzzleExceptionFromClientIsWrappedAndRedacted(): void
+    {
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(
+            new \InvalidArgumentException('Unable to parse URI: https://example.com/?accessToken=SECRET')
+        );
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame('Unable to parse URI: https://example.com/?accessToken=***', $ex->getMessage());
+            $this->assertNull($ex->getPrevious());
+        }
+        $this->assertFalse($communicator->ping());
+    }
+
+    public function testNonGuzzleExceptionWithoutTokenIsChained(): void
+    {
+        $original = new \RuntimeException('Proxy unavailable');
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException($original);
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame('Proxy unavailable', $ex->getMessage());
+            $this->assertSame($original, $ex->getPrevious());
+        }
+    }
+
+    public function testBodySummaryInOtherGuzzleErrorDoesNotKeepPartOfToken(): void
+    {
+        $token = str_repeat('a1b2c3d4e5', 4);
+        $response = new GuzzleResponse(200, [], json_encode(['error' => [str_repeat('x', 90) . ' ' . $token]]));
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(GuzzleRequestException::create(new Request('GET', '/'), $response));
+        $communicator = new ApiCommunicator('https://example.com', $token);
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertStringContainsString('200 OK', $ex->getMessage());
+            $this->assertStringNotContainsString(substr($token, 0, 10), $ex->getMessage());
+            $this->assertStringNotContainsString(substr($token, 0, 10), $ex->getPrevious()->getMessage());
+        }
+    }
+
+    public function testCustomGuzzleExceptionSubclassIsKept(): void
+    {
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(new CustomBadResponseException(
+            'Redirect refused',
+            new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET']),
+            new GuzzleResponse(302)
+        ));
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertInstanceOf(CustomBadResponseException::class, $ex->getPrevious());
+            $this->assertSame('Redirect refused', $ex->getPrevious()->getMessage());
+        }
+    }
+
+    public function testCustomGuzzleExceptionWithOtherConstructorFallsBackToNearestGuzzleClass(): void
+    {
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(new CustomStrictClientException(
+            new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET']),
+            new GuzzleResponse(401, [], '{}')
+        ));
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame(ClientException::class, get_class($ex->getPrevious()));
+            $this->assertSame(401, $ex->getHttpStatus());
+        }
+    }
+
+    public function testHttpErrorWithUnreadableBodyIsReportedAsRequestException(): void
+    {
+        $body = Psr7Utils::streamFor('error');
+        $body->detach();
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($this->createMockClient([new GuzzleResponse(500, [], $body)]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame(500, $ex->getHttpStatus());
+            $this->assertSame('', $ex->getResponseBody());
+        }
+    }
+
+    public function testApiErrorKeysAreRedacted(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(400, [], json_encode(['error' => ['SECRET' => 'is not valid']])),
+        ]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame(['***' => 'is not valid'], $ex->getApiErrors());
+        }
+
+        $communicator->setHttpClient(new Client([
+            'handler' => HandlerStack::create(new MockHandler([
+                new GuzzleResponse(400, [], json_encode(['error' => ['form' => ['SECRET' => ['taken']]]])),
+            ])),
+            'http_errors' => false,
+        ]));
+        $this->assertSame('{"form":{"***":["taken"]}}', json_encode($communicator->sendRequest('GET', 'Users')->getErrors()));
+    }
+
+    public function testRetryAfterHeaderIsUsedWithoutRateLimitConfig(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([new GuzzleResponse(429, ['Retry-After' => '7'])]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RateLimitException');
+        } catch (RateLimitException $ex) {
+            $this->assertSame(7, $ex->getRetryAfterSeconds());
+        }
+    }
+}
+
+class CustomBadResponseException extends BadResponseException
+{
+}
+
+class CustomStrictClientException extends ClientException
+{
+    public function __construct(RequestInterface $request, \Psr\Http\Message\ResponseInterface $response)
+    {
+        parent::__construct('Strict client failure', $request, $response);
+    }
 }

@@ -19,6 +19,7 @@ use GuzzleHttp\Exception\RequestException as GuzzleRequestException;
 use GuzzleHttp\Exception\ServerException;
 use GuzzleHttp\Exception\TooManyRedirectsException;
 use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Psr7\Message;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Uri;
 use GuzzleHttp\Psr7\Utils as Psr7Utils;
@@ -51,13 +52,13 @@ class ApiCommunicator
     private const IDEMPOTENT_METHODS = ['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'];
     /** @var int[] cURL error numbers raised before the request is sent (resolve/connect/TLS handshake failures) */
     private const CURL_ERRORS_BEFORE_SEND = [6, 7, 35];
-    /** @var string[] Guzzle exceptions that sanitize() copies with their own class */
+    /** @var string[] Guzzle exception classes a copied exception can have, most specific first */
     private const GUZZLE_REQUEST_EXCEPTIONS = [
-        GuzzleRequestException::class,
-        BadResponseException::class,
         ClientException::class,
         ServerException::class,
+        BadResponseException::class,
         TooManyRedirectsException::class,
+        GuzzleRequestException::class,
     ];
     /** @var int Largest response body, in bytes, copied into an exception chained as the previous exception */
     private const COPIED_BODY_LIMIT = 1048576;
@@ -190,27 +191,25 @@ class ApiCommunicator
                     || !$this->retryConfig->shouldRetryOnConnectionError()
                     || (!$canRetryAfterSend && !$this->failedBeforeSend($ex))
                 ) {
-                    throw new RequestException($this->redact($ex->getMessage()), $ex->getCode(), $this->chainable($ex));
+                    throw $this->wrapException($ex);
                 }
 
                 if ($attempt >= $maxAttempts - 1) {
-                    throw new RequestException(
-                        'Max retries exceeded: ' . $this->redact($ex->getMessage()),
-                        $ex->getCode(),
-                        $this->chainable($ex)
-                    );
+                    throw $this->wrapException($ex, 'Max retries exceeded: ');
                 }
                 $applyRetryDelay = true;
                 continue;
 
-            } catch (GuzzleException $ex) {
+            } catch (GuzzleException | \Exception $ex) {
+                // Any other client exception, e.g. an invalid redirect URL or one of a custom HTTP client
+                $exception = $this->wrapException($ex);
                 $this->logger?->error('API request failed', [
                     'method' => $method,
                     'endpoint' => $apiEndpoint,
-                    'error' => $this->redact($ex->getMessage()),
+                    'error' => $exception->getMessage(),
                     'code' => $ex->getCode(),
                 ]);
-                throw new RequestException($this->redact($ex->getMessage()), $ex->getCode(), $this->chainable($ex));
+                throw $exception;
             }
 
             $statusCode = $httpResponse->getStatusCode();
@@ -253,11 +252,10 @@ class ApiCommunicator
         }
 
         // If we exit the loop without returning, throw exception
-        throw new RequestException(
-            'Max retries exceeded: ' . $this->redact($lastException?->getMessage() ?? 'Unknown error'),
-            $lastException?->getCode() ?? 0,
-            $lastException === null ? null : $this->chainable($lastException)
-        );
+        if ($lastException !== null) {
+            throw $this->wrapException($lastException, 'Max retries exceeded: ');
+        }
+        throw new RequestException('Max retries exceeded: Unknown error');
     }
 
     /**
@@ -280,7 +278,12 @@ class ApiCommunicator
      */
     private function createHttpException(BadResponseException $ex, ResponseInterface $response): RequestException
     {
-        $body = $this->redact((string)$response->getBody());
+        try {
+            $body = $this->redact((string)$response->getBody());
+        } catch (\RuntimeException $readError) {
+            // e.g. a detached or write-only body of a custom HTTP client
+            $body = '';
+        }
         $decoded = json_decode($body);
         $apiErrors = is_object($decoded) ? $this->redactValues($this->normalizeErrors($decoded->error ?? null)) : [];
         $sanitized = $this->sanitize($ex, $body);
@@ -368,15 +371,20 @@ class ApiCommunicator
     }
 
     /**
-     * Returns the exception to be chained as the previous exception: a copy of the HTTP client exception
-     * without the access token (see sanitize()), because loggers and error trackers serialize the whole
-     * exception chain. With query parameter authentication nothing is chained.
+     * Wraps an exception of the HTTP client in a RequestException without the access token. The chained
+     * previous exception is a copy without the token (see sanitize()), because loggers and error trackers
+     * serialize the whole exception chain. With query parameter authentication nothing is chained.
      * @param Throwable $ex exception raised by the HTTP client
-     * @return Throwable|null exception safe to chain, or null
+     * @param string $messagePrefix text put before the message
+     * @return RequestException exception to be thrown
      */
-    private function chainable(Throwable $ex): ?Throwable
+    private function wrapException(Throwable $ex, string $messagePrefix = ''): RequestException
     {
-        return $this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY ? null : $this->sanitize($ex);
+        $sanitized = $this->sanitize($ex);
+        $message = $sanitized === null ? $this->redact($ex->getMessage()) : $sanitized->getMessage();
+        $previous = $this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY ? null : $sanitized;
+
+        return new RequestException($messagePrefix . $message, (int)$ex->getCode(), $previous);
     }
 
     /**
@@ -401,22 +409,71 @@ class ApiCommunicator
         if ($ex instanceof GuzzleRequestException) {
             $request = $this->withoutCredentials($ex->getRequest());
             $context = $this->redactContext($ex->getHandlerContext());
-            $response = $ex->getResponse();
-            if ($response === null) {
-                return new GuzzleRequestException($this->redact($ex->getMessage()), $request, null, null, $context);
+            $original = $ex->getResponse();
+            if ($original === null) {
+                return $this->copyException($ex, $this->redact($ex->getMessage()), $request, null, $context);
             }
-            $response = $this->withoutToken($response, $redactedBody);
-            if ($ex instanceof BadResponseException && $response->getStatusCode() >= 400) {
-                return GuzzleRequestException::create($request, $response, null, $context);
-            }
-            $class = in_array(get_class($ex), self::GUZZLE_REQUEST_EXCEPTIONS, true)
-                ? get_class($ex)
-                : GuzzleRequestException::class;
+            $response = $this->withoutToken($original, $redactedBody);
+            $message = $ex instanceof BadResponseException && $response->getStatusCode() >= 400
+                ? GuzzleRequestException::create($request, $response)->getMessage()
+                : $this->redact($this->withRedactedBodySummary($ex->getMessage(), $original, $response));
 
-            return new $class($this->redact($ex->getMessage()), $request, $response, null, $context);
+            return $this->copyException($ex, $message, $request, $response, $context);
         }
 
         return $this->redact($ex->getMessage()) === $ex->getMessage() ? $ex : null;
+    }
+
+    /**
+     * Creates a Guzzle exception of the class of the given one, or of the nearest Guzzle class when a custom
+     * subclass cannot be created with the Guzzle constructor arguments.
+     * @param GuzzleRequestException $ex exception to copy
+     * @param string $message message of the copy
+     * @param RequestInterface $request request of the copy
+     * @param ResponseInterface|null $response response of the copy
+     * @param array $context handler context of the copy
+     * @return GuzzleRequestException copy of the exception
+     */
+    private function copyException(
+        GuzzleRequestException $ex,
+        string $message,
+        RequestInterface $request,
+        ?ResponseInterface $response,
+        array $context
+    ): GuzzleRequestException {
+        // The class itself, then its Guzzle ancestors, most specific first
+        $classes = array_merge([get_class($ex)], array_intersect(self::GUZZLE_REQUEST_EXCEPTIONS, class_parents($ex)));
+        foreach ($classes as $class) {
+            try {
+                return new $class($message, $request, $response, null, $context);
+            } catch (\Throwable $constructorError) {
+                // A custom subclass with other constructor arguments: try the nearest Guzzle class
+            }
+        }
+
+        return new GuzzleRequestException($message, $request, $response, null, $context);
+    }
+
+    /**
+     * Replaces the summary of the raw response body that Guzzle puts in a message with the summary of the
+     * redacted body, because the raw summary is truncated and can end in the middle of the token.
+     * @param string $message message of the HTTP client exception
+     * @param ResponseInterface $original response received by the HTTP client
+     * @param ResponseInterface $copy response with the redacted body
+     * @return string message with the redacted body summary
+     */
+    private function withRedactedBodySummary(string $message, ResponseInterface $original, ResponseInterface $copy): string
+    {
+        try {
+            $summary = Message::bodySummary($original);
+        } catch (\RuntimeException $readError) {
+            return $message;
+        }
+        if ($summary === null || $summary === '' || strpos($message, $summary) === false) {
+            return $message;
+        }
+
+        return str_replace($summary, Message::bodySummary($copy) ?? '', $message);
     }
 
     /**
@@ -492,24 +549,26 @@ class ApiCommunicator
     }
 
     /**
-     * Redacts the access token from every string in decoded API errors, which may spell the token with
-     * JSON escapes the raw body redaction cannot match.
+     * Redacts the access token from every string, including map keys, in decoded API errors, which may
+     * spell the token with JSON escapes the raw body redaction cannot match.
      * @param array $values decoded values, possibly nested in lists, maps and objects
      * @return array values with every string redacted
      */
     private function redactValues(array $values): array
     {
+        $redacted = [];
         foreach ($values as $key => $value) {
             if (is_string($value)) {
-                $values[$key] = $this->redact($value);
+                $value = $this->redact($value);
             } elseif (is_array($value)) {
-                $values[$key] = $this->redactValues($value);
+                $value = $this->redactValues($value);
             } elseif (is_object($value)) {
-                $values[$key] = (object)$this->redactValues(get_object_vars($value));
+                $value = (object)$this->redactValues(get_object_vars($value));
             }
+            $redacted[is_string($key) ? $this->redact($key) : $key] = $value;
         }
 
-        return $values;
+        return $redacted;
     }
 
     /**
@@ -551,8 +610,7 @@ class ApiCommunicator
         bool $canRetry
     ): void {
         $retryAfterHeader = $response->getHeaderLine('Retry-After') ?: null;
-        $waitSeconds = $this->rateLimitConfig?->parseRetryAfter($retryAfterHeader)
-            ?? ($this->rateLimitConfig?->getDefaultWaitSeconds() ?? 5);
+        $waitSeconds = ($this->rateLimitConfig ?? new RateLimitConfig())->parseRetryAfter($retryAfterHeader);
 
         $this->logger?->warning('Rate limit hit', [
             'endpoint' => $endpoint,

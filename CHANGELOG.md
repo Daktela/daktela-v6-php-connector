@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file. The project fol
 
 ## [Unreleased]
 
+### Security
+
+- Wrapped every other exception of the HTTP client, such as an invalid redirect URL or an exception of a custom client, in a `RequestException` with the access token redacted. Previously, it reached the caller unchanged, so its message could contain the token and `ping()` and `healthCheck()` threw it.
+- Replaced the truncated body summary in messages of other Guzzle exceptions with the summary of the redacted body, so a token cut at the 120-byte limit no longer leaves a fragment.
+- Redacted the access token in the keys of decoded API errors, not only in their values.
+
+### Fixed
+
+- Kept the class of a custom subclass of a Guzzle exception in the copy chained as the previous exception. A subclass whose constructor takes other arguments falls back to the nearest Guzzle class.
+- Reported an HTTP error response whose body cannot be read as a `RequestException` with an empty body, instead of a `RuntimeException`.
+- Used the `Retry-After` header of an HTTP 429 response without a `RateLimitConfig`. `RateLimitException::getRetryAfterSeconds()` previously reported the default 5 seconds.
+
 ## [2.7.1] - 2026-10-14
 
 ### Security

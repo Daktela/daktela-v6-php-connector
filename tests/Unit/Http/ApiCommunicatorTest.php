@@ -12,6 +12,7 @@ use Daktela\DaktelaV6\Http\RateLimitConfig;
 use Daktela\DaktelaV6\Http\RetryConfig;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
+use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\RequestException as GuzzleRequestException;
 use GuzzleHttp\Handler\MockHandler;
@@ -20,6 +21,7 @@ use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use PHPUnit\Framework\TestCase;
+use Psr\Http\Message\RequestInterface;
 use Psr\Log\LoggerInterface;
 
 class ApiCommunicatorTest extends TestCase
@@ -362,7 +364,10 @@ class ApiCommunicatorTest extends TestCase
             $this->fail('Expected the transport exception to be wrapped');
         } catch (RequestException $exception) {
             $this->assertSame('Transport failed', $exception->getMessage());
-            $this->assertSame($guzzleException, $exception->getPrevious());
+            // A copy without the access token is chained instead of the client's exception
+            $this->assertInstanceOf(GuzzleRequestException::class, $exception->getPrevious());
+            $this->assertSame('Transport failed', $exception->getPrevious()->getMessage());
+            $this->assertSame('https://example.com', (string)$exception->getPrevious()->getRequest()->getUri());
         }
     }
 
@@ -1057,7 +1062,7 @@ class ApiCommunicatorTest extends TestCase
     /**
      * @dataProvider headerAuthenticationMethods
      */
-    public function testHeaderAuthenticationDropsPreviousExceptionThatContainsToken(int $method): void
+    public function testHeaderAuthenticationChainsPreviousExceptionWithoutToken(int $method): void
     {
         $communicator = new ApiCommunicator('https://example.com', 'SECRET');
         $communicator->setAuthenticationMethod($method);
@@ -1069,8 +1074,13 @@ class ApiCommunicatorTest extends TestCase
             $communicator->sendRequest('GET', 'Users');
             $this->fail('Expected RequestException');
         } catch (RequestException $ex) {
-            $this->assertNull($ex->getPrevious());
-            $this->assertSame(401, $ex->getHttpStatus());
+            $previous = $ex->getPrevious();
+            $this->assertInstanceOf(ClientException::class, $previous);
+            $this->assertSame(401, $previous->getResponse()->getStatusCode());
+            $this->assertStringNotContainsString('SECRET', $previous->getMessage());
+            $this->assertStringNotContainsString('SECRET', (string)$previous->getResponse()->getBody());
+            $this->assertFalse($previous->getRequest()->hasHeader('X-AUTH-TOKEN'));
+            $this->assertFalse($previous->getRequest()->hasHeader('Authorization'));
         }
     }
 
@@ -1080,6 +1090,164 @@ class ApiCommunicatorTest extends TestCase
             'X-AUTH-TOKEN' => [ApiCommunicator::AUTHENTICATION_METHOD_HEADER],
             'Bearer' => [ApiCommunicator::AUTHENTICATION_METHOD_BEARER],
         ];
+    }
+
+    public function testConnectionErrorChainsPreviousExceptionWithoutToken(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($this->createMockClient([
+            new ConnectException('Connection refused', new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET'])),
+        ]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $previous = $ex->getPrevious();
+            $this->assertInstanceOf(ConnectException::class, $previous);
+            $this->assertSame('Connection refused', $previous->getMessage());
+            $this->assertFalse($previous->getRequest()->hasHeader('X-AUTH-TOKEN'));
+        }
+    }
+
+    /**
+     * @dataProvider headerAuthenticationMethods
+     */
+    public function testTokenWithLineBreakIsNotLeakedByInvalidHeader(int $method): void
+    {
+        // e.g. a token read from a file without trimming the trailing newline
+        $communicator = new ApiCommunicator('https://example.com', "SECRET\n");
+        $communicator->setAuthenticationMethod($method);
+        $communicator->setHttpClient($this->createMockClient([]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertStringNotContainsString('SECRET', $ex->getMessage());
+            $this->assertNull($ex->getPrevious());
+        }
+        $this->assertFalse($communicator->ping());
+        $this->assertStringNotContainsString('SECRET', $communicator->healthCheck()['error']);
+    }
+
+    public function testHttpErrorMessageDoesNotContainPartOfEchoedToken(): void
+    {
+        $token = str_repeat('a1b2c3d4e5', 4);
+        // The token starts inside the 120-byte body summary of the message and ends after it
+        $body = json_encode(['error' => [str_repeat('x', 90) . ' ' . $token]]);
+        $logged = [];
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->method('error')->willReturnCallback(function (string $message, array $context) use (&$logged): void {
+            $logged[] = (string)($context['error'] ?? '');
+        });
+        $communicator = new ApiCommunicator('https://example.com', $token);
+        $communicator->setLogger($logger);
+        $communicator->setHttpClient($this->createMockClient([new GuzzleResponse(401, [], $body)]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertStringContainsString('401 Unauthorized', $ex->getMessage());
+            $this->assertNotEmpty($logged);
+            foreach (array_merge([$ex->getMessage()], $logged) as $text) {
+                $this->assertStringNotContainsString(substr($token, 0, 10), $text);
+            }
+        }
+    }
+
+    public function testApiErrorsRedactTokenWrittenWithJsonEscapes(): void
+    {
+        $escapedToken = chr(92) . 'u0053ECRET';
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(400, [], '{"error":["Token ' . $escapedToken . ' is not valid"]}'),
+        ]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame(['Token *** is not valid'], $ex->getApiErrors());
+        }
+    }
+
+    public function testResponseErrorsRedactToken(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient(new Client([
+            'handler' => HandlerStack::create(new MockHandler([
+                new GuzzleResponse(400, [], json_encode(['error' => ['form' => ['name' => ['SECRET is taken']]], 'result' => null])),
+            ])),
+            'http_errors' => false,
+        ]));
+
+        $response = $communicator->sendRequest('GET', 'Users');
+
+        $this->assertSame('{"form":{"name":["*** is taken"]}}', json_encode($response->getErrors()));
+    }
+
+    /**
+     * @dataProvider crossOriginRedirects
+     */
+    public function testDefaultClientDropsXAuthTokenOnCrossOriginRedirect(string $location): void
+    {
+        $requests = [];
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $this->useDefaultClientWithMockHandler($communicator, [
+            new GuzzleResponse(302, ['Location' => $location]),
+            $this->okResponse(),
+        ], $requests);
+
+        $communicator->sendRequest('GET', 'Users');
+
+        $this->assertCount(2, $requests);
+        $this->assertSame('SECRET', $requests[0]->getHeaderLine('X-AUTH-TOKEN'));
+        $this->assertFalse($requests[1]->hasHeader('X-AUTH-TOKEN'));
+    }
+
+    public static function crossOriginRedirects(): array
+    {
+        return [
+            'another host' => ['https://other.example.org/api/v6/users.json'],
+            'downgrade to http' => ['http://example.com/api/v6/users.json'],
+        ];
+    }
+
+    public function testDefaultClientKeepsXAuthTokenOnSameHostRedirect(): void
+    {
+        $requests = [];
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $this->useDefaultClientWithMockHandler($communicator, [
+            new GuzzleResponse(302, ['Location' => 'https://example.com/api/v6/users.json?moved=1']),
+            $this->okResponse(),
+        ], $requests);
+
+        $communicator->sendRequest('GET', 'Users');
+
+        $this->assertCount(2, $requests);
+        $this->assertSame('SECRET', $requests[1]->getHeaderLine('X-AUTH-TOKEN'));
+    }
+
+    /**
+     * Replaces the network handler of the communicator's default client, keeping its middleware.
+     * @param RequestInterface[] $requests receives every request that reaches the network handler
+     */
+    private function useDefaultClientWithMockHandler(ApiCommunicator $communicator, array $responses, array &$requests): void
+    {
+        $method = new \ReflectionMethod($communicator, 'createDefaultClient');
+        if (PHP_VERSION_ID < 80100) {
+            $method->setAccessible(true);
+        }
+        /** @var Client $client */
+        $client = $method->invoke($communicator);
+        $mock = new MockHandler($responses);
+        $client->getConfig('handler')->setHandler(function (RequestInterface $request, array $options) use ($mock, &$requests) {
+            $requests[] = $request;
+            return $mock($request, $options);
+        });
+        $communicator->setHttpClient($client);
     }
 
     public function testJsonEscapedTokenIsRedactedFromResponseBody(): void

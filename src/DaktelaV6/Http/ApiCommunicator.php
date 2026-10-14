@@ -14,9 +14,16 @@ use GuzzleHttp\Exception\BadResponseException;
 use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\InvalidArgumentException;
+use GuzzleHttp\Exception\RequestException as GuzzleRequestException;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Request;
+use GuzzleHttp\Psr7\Uri;
+use GuzzleHttp\Psr7\Utils as Psr7Utils;
 use GuzzleHttp\Utils;
+use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\UriInterface;
 use Psr\Log\LoggerInterface;
 use Throwable;
 
@@ -216,13 +223,14 @@ class ApiCommunicator
             }
 
             if ($httpException !== null) {
+                $exception = $this->createHttpException($httpException, $httpResponse);
                 $this->logger?->error('API request failed', [
                     'method' => $method,
                     'endpoint' => $apiEndpoint,
-                    'error' => $this->redact($httpException->getMessage()),
+                    'error' => $exception->getMessage(),
                     'code' => $httpException->getCode(),
                 ]);
-                throw $this->createHttpException($httpException, $httpResponse);
+                throw $exception;
             }
 
             return $this->parseResponse($httpResponse);
@@ -258,9 +266,10 @@ class ApiCommunicator
     {
         $body = $this->redact((string)$response->getBody());
         $decoded = json_decode($body);
-        $apiErrors = is_object($decoded) ? $this->normalizeErrors($decoded->error ?? null) : [];
-        $message = $this->redact($ex->getMessage());
-        $previous = $this->chainable($ex);
+        $apiErrors = is_object($decoded) ? $this->redactErrors($this->normalizeErrors($decoded->error ?? null)) : [];
+        $sanitized = $this->sanitize($ex);
+        $message = $sanitized === null ? $this->redact($ex->getMessage()) : $sanitized->getMessage();
+        $previous = $this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY ? null : $sanitized;
 
         if ($response->getStatusCode() === 404) {
             return new NotFoundException($message, $previous, $body, $apiErrors);
@@ -343,22 +352,89 @@ class ApiCommunicator
     }
 
     /**
-     * Returns the HTTP client exception to be chained as the previous exception. It is not chained when it
-     * may carry the access token, because loggers and error trackers serialize the whole exception chain:
-     * with query parameter authentication its message and request URL contain the token, and with any
-     * method its message contains the response body, which may echo the token.
+     * Returns the exception to be chained as the previous exception: a copy of the HTTP client exception
+     * without the access token (see sanitize()), because loggers and error trackers serialize the whole
+     * exception chain. With query parameter authentication nothing is chained.
      * @param Throwable $ex exception raised by the HTTP client
      * @return Throwable|null exception safe to chain, or null
      */
     private function chainable(Throwable $ex): ?Throwable
     {
-        if ($this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY
-            || $this->redact($ex->getMessage()) !== $ex->getMessage()
-        ) {
-            return null;
+        return $this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY ? null : $this->sanitize($ex);
+    }
+
+    /**
+     * Returns a copy of an HTTP client exception that does not carry the access token: the credential headers
+     * are removed from its request, and the token is redacted from the request URL, the message, and the
+     * response body. The message of an HTTP error response is rebuilt from the redacted body, because the
+     * client's message summarizes the raw body and its truncation can cut the token.
+     * @param Throwable $ex exception raised by the HTTP client
+     * @return Throwable|null copy without the token, or null when the exception cannot be copied
+     */
+    private function sanitize(Throwable $ex): ?Throwable
+    {
+        if ($ex instanceof ConnectException) {
+            return new ConnectException(
+                $this->redact($ex->getMessage()),
+                $this->withoutCredentials($ex->getRequest()),
+                null,
+                $ex->getHandlerContext()
+            );
+        }
+        if ($ex instanceof GuzzleRequestException) {
+            $request = $this->withoutCredentials($ex->getRequest());
+            $response = $ex->getResponse();
+            if ($response !== null) {
+                $response = $response->withBody(Psr7Utils::streamFor($this->redact((string)$response->getBody())));
+            }
+            if ($ex instanceof BadResponseException && $response !== null) {
+                return GuzzleRequestException::create($request, $response, null, $ex->getHandlerContext());
+            }
+
+            return new GuzzleRequestException(
+                $this->redact($ex->getMessage()),
+                $request,
+                $response,
+                null,
+                $ex->getHandlerContext()
+            );
         }
 
-        return $ex;
+        return $this->redact($ex->getMessage()) === $ex->getMessage() ? $ex : null;
+    }
+
+    /**
+     * Removes the access token from a request: the credential headers and the token in the URL.
+     * @param RequestInterface $request request sent by the HTTP client
+     * @return RequestInterface request without the access token
+     */
+    private function withoutCredentials(RequestInterface $request): RequestInterface
+    {
+        return $request
+            ->withoutHeader('X-AUTH-TOKEN')
+            ->withoutHeader('Authorization')
+            ->withUri(new Uri($this->redact((string)$request->getUri())), true);
+    }
+
+    /**
+     * Redacts the access token from decoded API errors, which may spell it with JSON escapes the raw body
+     * redaction cannot match.
+     * @param array $errors errors in the shape returned by normalizeErrors()
+     * @return array errors with every string value redacted
+     */
+    private function redactErrors(array $errors): array
+    {
+        foreach ($errors as $key => $error) {
+            if (is_string($error)) {
+                $errors[$key] = $this->redact($error);
+            } elseif (is_array($error)) {
+                $errors[$key] = $this->redactErrors($error);
+            } elseif (is_object($error)) {
+                $errors[$key] = (object)$this->redactErrors(get_object_vars($error));
+            }
+        }
+
+        return $errors;
     }
 
     /**
@@ -464,7 +540,12 @@ class ApiCommunicator
         $requestUri = $basePath . self::API_NAMESPACE . lcfirst($apiEndpoint) . ".json?" . http_build_query($queryParams);
         $body = $data !== null ? Utils::jsonEncode($data) : null;
 
-        return new Request($method, $requestUri, $headers, $body);
+        try {
+            return new Request($method, $requestUri, $headers, $body);
+        } catch (\InvalidArgumentException $ex) {
+            // An invalid header value, e.g. an access token with a trailing newline, is quoted in the message
+            throw new RequestException($this->redact($ex->getMessage()));
+        }
     }
 
     /**
@@ -494,7 +575,7 @@ class ApiCommunicator
             }
         }
 
-        $errors = is_object($responseBody) ? $this->normalizeErrors($responseBody->error ?? null) : [];
+        $errors = is_object($responseBody) ? $this->redactErrors($this->normalizeErrors($responseBody->error ?? null)) : [];
 
         if (!isset($responseBody->result)) {
             $this->logger?->debug('API response received (no result)', [
@@ -523,11 +604,34 @@ class ApiCommunicator
      */
     private function createDefaultClient(): ClientInterface
     {
+        $instance = new Uri((string)self::normalizeUrl($this->baseUrl));
+        $handler = HandlerStack::create();
+        // Guzzle removes the Authorization header when a redirect leaves the origin, but not X-AUTH-TOKEN.
+        // Placed after allow_redirects, the middleware also sees every redirected request.
+        $handler->after('allow_redirects', Middleware::mapRequest(
+            static fn (RequestInterface $request): RequestInterface => self::leavesInstance($instance, $request->getUri())
+                ? $request->withoutHeader('X-AUTH-TOKEN')
+                : $request
+        ), 'drop_token_outside_instance');
+
         return new Client([
-            'base_uri' => self::normalizeUrl($this->baseUrl),
+            'base_uri' => $instance,
             'timeout' => $this->requestTimeout,
             'verify' => $this->verifySsl,
+            'handler' => $handler,
         ]);
+    }
+
+    /**
+     * Checks whether a request URL leaves the Daktela instance: another host, or plain HTTP from an HTTPS instance.
+     * @param UriInterface $instance URL of the Daktela instance
+     * @param UriInterface $target URL the request is sent to
+     * @return bool true when the access token must not be sent to the URL
+     */
+    private static function leavesInstance(UriInterface $instance, UriInterface $target): bool
+    {
+        return strcasecmp($target->getHost(), $instance->getHost()) !== 0
+            || ($instance->getScheme() === 'https' && $target->getScheme() !== 'https');
     }
 
     /**

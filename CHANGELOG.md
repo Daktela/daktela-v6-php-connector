@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file. The project fol
 
 ## [Unreleased]
 
+### Security
+
+- Chained a copy of the Guzzle exception without the access token as the previous exception with header authentication. Its request has no credential headers, and the token is replaced in its URL, message, and response body. Previously, the chained exception held the `X-AUTH-TOKEN` or `Authorization` header and the raw response body, and 2.7.0 dropped it entirely when its message contained the token.
+- Rebuilt HTTP error messages from the redacted response body. The Guzzle message summarizes the first 120 bytes of the raw body, so a token echoed across that limit left a fragment in exception messages, log entries, and `healthCheck()` errors.
+- Turned an invalid request header, such as an access token with a trailing newline, into a `RequestException` with the token redacted. Previously, Guzzle's `InvalidArgumentException` quoted the full token, and `ping()` and `healthCheck()` threw it instead of reporting the API as unhealthy.
+- Made the default HTTP client drop the `X-AUTH-TOKEN` header from redirected requests that leave the instance: another host, or plain HTTP from an HTTPS instance. Guzzle already removes the `Authorization` header on such redirects.
+- Redacted the access token from decoded API errors in `RequestException::getApiErrors()` and `Response::getErrors()`. This covers a token written with JSON escapes and errors of responses received through a client with `http_errors` disabled.
+
+No public method signatures were changed in this release. With header authentication, `RequestException::getPrevious()` is again a Guzzle exception for HTTP and connection errors, as before 2.7.0, but it is a copy, not the instance the HTTP client threw.
+
 ## [2.7.0] - 2026-10-14
 
 ### Security

@@ -343,15 +343,22 @@ class ApiCommunicator
     }
 
     /**
-     * Returns the HTTP client exception to be chained as the previous exception. With query parameter
-     * authentication, its message and request URL contain the access token, so it is not chained:
-     * loggers and error trackers serialize the whole exception chain.
+     * Returns the HTTP client exception to be chained as the previous exception. It is not chained when it
+     * may carry the access token, because loggers and error trackers serialize the whole exception chain:
+     * with query parameter authentication its message and request URL contain the token, and with any
+     * method its message contains the response body, which may echo the token.
      * @param Throwable $ex exception raised by the HTTP client
      * @return Throwable|null exception safe to chain, or null
      */
     private function chainable(Throwable $ex): ?Throwable
     {
-        return $this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY ? null : $ex;
+        if ($this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY
+            || $this->redact($ex->getMessage()) !== $ex->getMessage()
+        ) {
+            return null;
+        }
+
+        return $ex;
     }
 
     /**
@@ -477,7 +484,13 @@ class ApiCommunicator
                 $this->logger?->error('Failed to parse API response', [
                     'error' => $ex->getMessage(),
                 ]);
-                throw new RequestException($ex->getMessage(), $ex->getCode(), $ex);
+                throw new RequestException(
+                    $ex->getMessage(),
+                    $ex->getCode(),
+                    $ex,
+                    $httpResponse->getStatusCode(),
+                    $this->redact((string)$httpResponse->getBody())
+                );
             }
         }
 
@@ -671,7 +684,7 @@ class ApiCommunicator
             if ($ex->getHttpStatus() !== null) {
                 $result['status_code'] = $ex->getHttpStatus();
             }
-            $result['error'] = $this->firstErrorMessage($ex->getApiErrors()) ?? $ex->getMessage();
+            $result['error'] = $this->redact($this->firstErrorMessage($ex->getApiErrors()) ?? $ex->getMessage());
 
             return $result;
         }

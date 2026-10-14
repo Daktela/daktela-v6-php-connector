@@ -258,13 +258,13 @@ try {
 }
 ```
 
-The access token is replaced with `***` in exception messages, the stored response body and API errors, and log entries produced by the connector. With query parameter authentication, the Guzzle exception is not chained as `$ex->getPrevious()`, because its request URL contains the token; use `getHttpStatus()`, `getResponseBody()`, and `getApiErrors()` instead. The response body may contain personal data, so log it with care.
+The access token is replaced with `***` in exception messages, the stored response body and API errors, and log entries produced by the connector. The Guzzle exception is not chained as `$ex->getPrevious()` when it may contain the token: always with query parameter authentication, because its request URL contains the token, and with the header methods when the response echoes the token. Use `getHttpStatus()`, `getResponseBody()`, and `getApiErrors()` instead. The response body may contain personal data, so log it with care.
 
 ## Access Tokens
 
 Use a static API token for integrations. An administrator creates it in Manage → Users → [user detail] → Persistent API tokens, or through the `apiToken` API endpoint.
 
-- **Static tokens expire.** Since Daktela 2025.2, each static token has an expiration date (up to 720 days) and can be extended automatically on each use ("Extend with each use"). An expired, deactivated, or deleted token, or a token of a deactivated user, makes the API answer HTTP 401. Check the expiration date when you set up an integration, and monitor the token with `healthCheck()` (see [Health Check](#health-check)).
+- **Static tokens expire.** Since Daktela 2025.2, each static token has an expiration date (up to 720 days) and can be extended automatically on each use ("Extend with each use"). With an expired, deactivated, or deleted token, or a token of a deactivated user, API endpoints answer HTTP 401 and the health check reports the token as not accepted. Check the expiration date when you set up an integration, and monitor the token with `healthCheck()` (see [Health Check](#health-check)).
 - **Dynamic tokens are not refreshed.** The access token returned by `login.json` is a short-lived JWT (typically valid for one hour), paired with a refresh token. The connector does not log in or refresh tokens, so a dynamic token stops working when it expires. Use a static token for long-running integrations.
 
 Integrations that use a static token need no changes when Daktela is updated to a version that uses JWT sessions for the web interface.
@@ -285,7 +285,7 @@ $client = new Client($instance, $accessToken);
 
 ### 2. Authorization: Bearer Header
 
-The standard `Authorization: Bearer <token>` header is the method the Daktela API documentation recommends. It requires Daktela 31.37.0, 32.36.0, 33.14.0, or later. Older versions do not read this header and answer HTTP 401.
+The standard `Authorization: Bearer <token>` header is the method the Daktela API documentation recommends. It requires Daktela 31.37.0, 32.36.0, 33.14.0, or later. Older versions do not read this header: API endpoints answer HTTP 401, and the health check reports the token as not accepted.
 
 ```php
 use Daktela\DaktelaV6\Client;

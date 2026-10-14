@@ -24,7 +24,8 @@ class RateLimitException extends RequestException
         parent::__construct(
             "Rate limit exceeded. Retry after {$retryAfterSeconds} seconds.",
             429,
-            $previous
+            $previous,
+            429
         );
     }
 

@@ -4,9 +4,15 @@ All notable changes to this project are documented in this file. The project fol
 
 ## [Unreleased]
 
+### Security
+
+- Stopped chaining the Guzzle exception as the previous exception with header authentication (`X-AUTH-TOKEN` or `Authorization: Bearer`) when its message contains the access token, for example because the response echoes it. Query parameter authentication already did not chain it.
+
 ### Fixed
 
 - Made `ping()` and `healthCheck()` report an invalid, expired, or revoked access token as unhealthy. The `whoim` endpoint answers such requests with HTTP 200 and no user, which the health check previously reported as healthy; it now requires the response to identify a user.
+- `RateLimitException::getHttpStatus()` now returns 429 instead of `null`, so `healthCheck()` reports `status_code` 429 for a rate-limited check.
+- A response that is not valid JSON now throws a `RequestException` that carries the HTTP status and the response body (with the access token redacted), instead of neither.
 
 ### Added
 

@@ -88,6 +88,13 @@ class ExceptionTest extends TestCase
         $this->assertEquals(429, $exception->getCode());
     }
 
+    public function testRateLimitExceptionReportsHttpStatus429(): void
+    {
+        $exception = new RateLimitException(30);
+
+        $this->assertSame(429, $exception->getHttpStatus());
+    }
+
     public function testRateLimitExceptionGetRetryAfterSeconds(): void
     {
         $exception = new RateLimitException(60);

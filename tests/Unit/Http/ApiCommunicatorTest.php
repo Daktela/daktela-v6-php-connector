@@ -557,6 +557,22 @@ class ApiCommunicatorTest extends TestCase
         $communicator->sendRequest('GET', 'Users');
     }
 
+    public function testInvalidJsonExceptionCarriesHttpStatusAndRedactedBody(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(200, [], '<html>Hello SECRET</html>'),
+        ]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame(200, $ex->getHttpStatus());
+            $this->assertSame('<html>Hello ***</html>', $ex->getResponseBody());
+        }
+    }
+
     public function testSendRequestThrowsAfterConnectionRetriesAreExhausted(): void
     {
         $mockClient = $this->createMockClient([
@@ -639,6 +655,45 @@ class ApiCommunicatorTest extends TestCase
         $this->assertFalse($result['healthy']);
         $this->assertArrayHasKey('latency_ms', $result);
         $this->assertArrayHasKey('error', $result);
+        $this->assertArrayNotHasKey('status_code', $result);
+    }
+
+    public function testHealthCheckReportsStatusCodeWhenRateLimited(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([new GuzzleResponse(429, ['Retry-After' => '7'])]));
+
+        $result = $communicator->healthCheck();
+
+        $this->assertFalse($result['healthy']);
+        $this->assertSame(429, $result['status_code']);
+    }
+
+    public function testHealthCheckReportsStatusCodeForNonJsonResponse(): void
+    {
+        // e.g. a proxy's HTML error page received through a client that does not throw on HTTP errors
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient(new Client([
+            'handler' => HandlerStack::create(new MockHandler([
+                new GuzzleResponse(401, [], '<html>Unauthorized</html>'),
+            ])),
+            'http_errors' => false,
+        ]));
+
+        $result = $communicator->healthCheck();
+
+        $this->assertFalse($result['healthy']);
+        $this->assertSame(401, $result['status_code']);
+    }
+
+    public function testHealthCheckRedactsTokenInApiErrorOfReceivedResponse(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(200, [], json_encode(['error' => ['Token SECRET expired'], 'result' => ['user' => null]])),
+        ]));
+
+        $this->assertSame('Token *** expired', $communicator->healthCheck()['error']);
     }
 
     public function testPingReturnsFalseWhenTokenIsNotAccepted(): void
@@ -997,6 +1052,34 @@ class ApiCommunicatorTest extends TestCase
         } catch (RequestException $ex) {
             $this->assertInstanceOf(GuzzleRequestException::class, $ex->getPrevious());
         }
+    }
+
+    /**
+     * @dataProvider headerAuthenticationMethods
+     */
+    public function testHeaderAuthenticationDropsPreviousExceptionThatContainsToken(int $method): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setAuthenticationMethod($method);
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(401, [], json_encode(['error' => ['Token SECRET is not valid']])),
+        ]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertNull($ex->getPrevious());
+            $this->assertSame(401, $ex->getHttpStatus());
+        }
+    }
+
+    public static function headerAuthenticationMethods(): array
+    {
+        return [
+            'X-AUTH-TOKEN' => [ApiCommunicator::AUTHENTICATION_METHOD_HEADER],
+            'Bearer' => [ApiCommunicator::AUTHENTICATION_METHOD_BEARER],
+        ];
     }
 
     public function testJsonEscapedTokenIsRedactedFromResponseBody(): void

@@ -364,9 +364,9 @@ class Client
     }
 
     /**
-     * Performs a health check to verify API connectivity.
+     * Checks that the API is reachable and accepts the access token.
      *
-     * @return bool True if the API is reachable and responding
+     * @return bool True if the API identifies the user of the access token
      */
     public function ping(): bool
     {
@@ -374,7 +374,8 @@ class Client
     }
 
     /**
-     * Performs a detailed health check.
+     * Performs a detailed health check. The API is healthy only when it identifies the user of the access token;
+     * `error` holds the first error message reported by the API, or the transport error.
      *
      * @return array{healthy: bool, latency_ms: float, status_code?: int, error?: string}
      */

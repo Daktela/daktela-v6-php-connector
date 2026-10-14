@@ -542,14 +542,10 @@ class ApiCommunicatorTest extends TestCase
 
     public function testPingReturnsTrue(): void
     {
-        $mockClient = $this->createMockClient([
-            new GuzzleResponse(200, [], json_encode([
-                'result' => ['data' => [], 'total' => 0],
-            ])),
-        ]);
-
         $communicator = new ApiCommunicator('https://example.com', 'token');
-        $communicator->setHttpClient($mockClient);
+        $communicator->setHttpClient($this->createMockClient([
+            $this->whoimResponse(['name' => 'api', 'title' => 'API user']),
+        ]));
 
         $this->assertTrue($communicator->ping());
     }
@@ -568,20 +564,17 @@ class ApiCommunicatorTest extends TestCase
 
     public function testHealthCheckReturnsDetails(): void
     {
-        $mockClient = $this->createMockClient([
-            new GuzzleResponse(200, [], json_encode([
-                'result' => ['data' => [], 'total' => 0],
-            ])),
-        ]);
-
         $communicator = new ApiCommunicator('https://example.com', 'token');
-        $communicator->setHttpClient($mockClient);
+        $communicator->setHttpClient($this->createMockClient([
+            $this->whoimResponse(['name' => 'api', 'title' => 'API user']),
+        ]));
 
         $result = $communicator->healthCheck();
 
         $this->assertTrue($result['healthy']);
         $this->assertArrayHasKey('latency_ms', $result);
-        $this->assertEquals(200, $result['status_code']);
+        $this->assertSame(200, $result['status_code']);
+        $this->assertArrayNotHasKey('error', $result);
     }
 
     public function testHealthCheckReturnsErrorOnFailure(): void
@@ -600,6 +593,88 @@ class ApiCommunicatorTest extends TestCase
         $this->assertArrayHasKey('error', $result);
     }
 
+    public function testPingReturnsFalseWhenTokenIsNotAccepted(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([$this->whoimResponse(null)]));
+
+        $this->assertFalse($communicator->ping());
+    }
+
+    public function testHealthCheckReportsTokenNotAcceptedWhenWhoimReturnsNoUser(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([$this->whoimResponse(null)]));
+
+        $result = $communicator->healthCheck();
+
+        $this->assertFalse($result['healthy']);
+        $this->assertSame(200, $result['status_code']);
+        $this->assertSame('The access token was not accepted: the API did not identify a user.', $result['error']);
+    }
+
+    public function testHealthCheckReportsApiErrorForPendingPasswordChange(): void
+    {
+        // The body as the API sends it: translated message with JSON-escaped non-ASCII characters
+        $body = '{"error":{"error":"Koniecznie ustaw nowe hasło"},"result":null,'
+            . '"_serverTime":"2026-05-28 13:32:25","_time":"2026-05-28 13:32:25","_timezone":"Europe/Warsaw"}';
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(400, [], $body),
+            new GuzzleResponse(400, [], $body),
+        ]));
+
+        $result = $communicator->healthCheck();
+
+        $this->assertFalse($result['healthy']);
+        $this->assertSame(400, $result['status_code']);
+        $this->assertSame('Koniecznie ustaw nowe hasło', $result['error']);
+        $this->assertFalse($communicator->ping());
+    }
+
+    public function testHealthCheckUsesFirstNestedApiErrorMessage(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(400, [], json_encode(['error' => ['form' => ['password' => ['', 'Too short']]]])),
+        ]));
+
+        $this->assertSame('Too short', $communicator->healthCheck()['error']);
+    }
+
+    public function testHealthCheckFallsBackToExceptionMessageWithoutApiError(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_QUERY);
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(401, [], 'Unauthorized'),
+        ]));
+
+        $result = $communicator->healthCheck();
+
+        $this->assertFalse($result['healthy']);
+        $this->assertSame(401, $result['status_code']);
+        $this->assertStringContainsString('401 Unauthorized', $result['error']);
+        $this->assertStringNotContainsString('SECRET', $result['error']);
+    }
+
+    public function testHealthCheckReportsApiErrorWhenClientDoesNotThrowOnHttpErrors(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient(new Client([
+            'handler' => HandlerStack::create(new MockHandler([
+                new GuzzleResponse(400, [], json_encode(['error' => ['error' => 'New password should be set'], 'result' => null])),
+            ])),
+            'http_errors' => false,
+        ]));
+
+        $result = $communicator->healthCheck();
+
+        $this->assertFalse($result['healthy']);
+        $this->assertSame(400, $result['status_code']);
+        $this->assertSame('New password should be set', $result['error']);
+    }
+
     private function connectError(int $errno): ConnectException
     {
         return new ConnectException(
@@ -613,6 +688,25 @@ class ApiCommunicatorTest extends TestCase
     private function okResponse(): GuzzleResponse
     {
         return new GuzzleResponse(200, [], json_encode(['error' => [], 'result' => ['data' => [], 'total' => 0]]));
+    }
+
+    /**
+     * Builds a whoim response in the shape the Daktela API returns it.
+     * @param array|null $user identified user, or null when the access token was not accepted
+     */
+    private function whoimResponse(?array $user): GuzzleResponse
+    {
+        return new GuzzleResponse(200, [], json_encode([
+            'error' => [],
+            'result' => [
+                'version' => [
+                    'current' => '2026.1',
+                    'extApps' => ['mobileAndroid' => null, 'mobileIos' => null, 'webExtension' => null],
+                ],
+                'user' => $user,
+            ],
+            '_time' => '2026-10-14 10:00:00',
+        ]));
     }
 
     public function testPostIsNotRetriedAfterTimeout(): void

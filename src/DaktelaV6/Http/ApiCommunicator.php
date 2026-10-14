@@ -40,6 +40,8 @@ class ApiCommunicator
     private const IDEMPOTENT_METHODS = ['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'];
     /** @var int[] cURL error numbers raised before the request is sent (resolve/connect/TLS handshake failures) */
     private const CURL_ERRORS_BEFORE_SEND = [6, 7, 35];
+    /** @var string Health check error used when the API answers without identifying the token's user */
+    private const TOKEN_NOT_ACCEPTED_ERROR = 'The access token was not accepted: the API did not identify a user.';
     /** @var array static variable containing all singleton instances of the transport class */
     private static $singletons = [];
     /** @var string URL of the Daktela instance */
@@ -280,6 +282,37 @@ class ApiCommunicator
         }
 
         return [$errors];
+    }
+
+    /**
+     * Checks whether a whoim response identifies the user of the access token. The endpoint is public,
+     * so a request whose token was not accepted still gets HTTP 200, with a null user.
+     * @param mixed $data `result` member of the whoim response
+     * @return bool true when the response contains a user
+     */
+    private function identifiesUser(mixed $data): bool
+    {
+        return is_object($data) && ($data->user ?? null) !== null;
+    }
+
+    /**
+     * Returns the first error message reported by the API, searching nested lists and maps.
+     * @param array $errors errors in the shape returned by normalizeErrors()
+     * @return string|null first non-empty message, or null when there is none
+     */
+    private function firstErrorMessage(array $errors): ?string
+    {
+        foreach ($errors as $error) {
+            if (is_object($error)) {
+                $error = get_object_vars($error);
+            }
+            $message = is_array($error) ? $this->firstErrorMessage($error) : (is_string($error) ? trim($error) : null);
+            if ($message !== null && $message !== '') {
+                return $message;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -579,25 +612,21 @@ class ApiCommunicator
     }
 
     /**
-     * Performs a health check to verify API connectivity.
-     * Uses the whoim endpoint which is accessible to all authenticated users.
+     * Checks that the API is reachable and accepts the access token.
+     * @see healthCheck() for the details of the check
      *
-     * @return bool True if the API is reachable and responding
+     * @return bool True if the API identifies the user of the access token
      */
     public function ping(): bool
     {
-        try {
-            $response = $this->sendRequest('GET', 'whoim');
-            return $response->isSuccess();
-        } catch (RequestException $ex) {
-            // Connection, authentication and API errors all mean the API is not usable
-            return false;
-        }
+        return $this->healthCheck()['healthy'];
     }
 
     /**
      * Performs a health check and returns detailed information.
-     * Uses the whoim endpoint which is accessible to all authenticated users.
+     * Calls the whoim endpoint. The API is healthy only when the response identifies the user of the
+     * access token: whoim also answers requests whose token was not accepted, with HTTP 200 and no user.
+     * `error` holds the first error message reported by the API, or the transport error when there is none.
      *
      * @return array{healthy: bool, latency_ms: float, status_code?: int, error?: string}
      */
@@ -607,21 +636,27 @@ class ApiCommunicator
 
         try {
             $response = $this->sendRequest('GET', 'whoim');
-            $latencyMs = (microtime(true) - $startTime) * 1000;
-
-            return [
-                'healthy' => $response->isSuccess(),
-                'latency_ms' => round($latencyMs, 2),
-                'status_code' => $response->getHttpStatus(),
-            ];
         } catch (RequestException $ex) {
-            $latencyMs = (microtime(true) - $startTime) * 1000;
+            $result = ['healthy' => false, 'latency_ms' => round((microtime(true) - $startTime) * 1000, 2)];
+            if ($ex->getHttpStatus() !== null) {
+                $result['status_code'] = $ex->getHttpStatus();
+            }
+            $result['error'] = $this->firstErrorMessage($ex->getApiErrors()) ?? $ex->getMessage();
 
-            return [
-                'healthy' => false,
-                'latency_ms' => round($latencyMs, 2),
-                'error' => $ex->getMessage(),
-            ];
+            return $result;
         }
+
+        $result = [
+            'healthy' => $response->isSuccess() && $this->identifiesUser($response->getData()),
+            'latency_ms' => round((microtime(true) - $startTime) * 1000, 2),
+            'status_code' => $response->getHttpStatus(),
+        ];
+        if (!$result['healthy']) {
+            // Only text received from the API can contain the token
+            $apiError = $this->firstErrorMessage($response->getErrors());
+            $result['error'] = $apiError !== null ? $this->redact($apiError) : self::TOKEN_NOT_ACCEPTED_ERROR;
+        }
+
+        return $result;
     }
 }

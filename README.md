@@ -402,19 +402,27 @@ try {
 
 ## Health Check
 
-You can verify API connectivity before making requests:
+`ping()` and `healthCheck()` call the `whoim` endpoint and report the API as healthy only when the response identifies the user of the access token. The endpoint also answers requests whose token was not accepted (invalid, expired, or revoked token, or a deactivated user) with HTTP 200 and no user, and the health check reports those as unhealthy.
 
 ```php
 // Simple ping
 if ($client->ping()) {
-    echo "API is reachable";
+    echo "API is reachable and accepts the access token";
 }
 
 // Detailed health check
 $health = $client->healthCheck();
-// Returns: ['healthy' => true, 'latency_ms' => 45.2, 'status_code' => 200]
-// Or on error: ['healthy' => false, 'latency_ms' => 1000.5, 'error' => 'Connection refused']
+// Healthy:         ['healthy' => true, 'latency_ms' => 45.2, 'status_code' => 200]
+// Token rejected:  ['healthy' => false, 'latency_ms' => 40.1, 'status_code' => 200, 'error' => 'The access token was not accepted: the API did not identify a user.']
+// API error:       ['healthy' => false, 'latency_ms' => 52.7, 'status_code' => 400, 'error' => 'New password should be set']
+// Network failure: ['healthy' => false, 'latency_ms' => 2001.3, 'error' => 'cURL error 7: Failed to connect ...']
 ```
+
+`error` contains the first error message reported by the API, in the language of the token's user, or the transport error when no API error is available. `status_code` is missing when no HTTP response was received.
+
+`whoim` also checks the state of the user account. For an account with an unfinished password change (its profile requires a one-time password and the new password was never set), it returns HTTP 400 `New password should be set`, although other endpoints still accept the token. Set the new password in the Daktela web interface to make the health check pass.
+
+`whoim` is the request the Daktela web interface makes at startup, and it is heavier than a typical read. Use the health check at startup or for monitoring, not before every request.
 
 ## Memory-Efficient Iteration
 

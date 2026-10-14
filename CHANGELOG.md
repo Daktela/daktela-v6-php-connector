@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file. The project fol
 
 ## [Unreleased]
 
+### Fixed
+
+- Made `ping()` and `healthCheck()` report an invalid, expired, or revoked access token as unhealthy. The `whoim` endpoint answers such requests with HTTP 200 and no user, which the health check previously reported as healthy; it now requires the response to identify a user.
+
+### Changed
+
+- `healthCheck()` now reports the first error message returned by the API (for example `New password should be set`) as `error`, and includes `status_code` for HTTP error responses. Previously, `error` contained the HTTP client's message with a truncated response body, and `status_code` was missing.
+
 ## [2.6.0] - 2026-10-06
 
 ### Security

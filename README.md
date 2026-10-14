@@ -311,10 +311,10 @@ final class FileTokenStore implements TokenStore
 $client = Client::login($instance, $username, $password, new FileTokenStore('/var/lib/myapp/daktela-tokens.json'));
 ```
 
-- The password is kept in memory to log in again. The connector never stores it. It keeps the password and the tokens out of the traces of the exceptions it throws, and out of `var_dump()` and `print_r()` output.
+- The password is kept in memory to log in again. The connector never stores it. It keeps the password and the tokens out of the traces of the exceptions it throws, and out of `var_dump()`, `print_r()`, `var_export()`, and `serialize()` output. An unserialized copy of a client has no login session.
 - Saved tokens record the user and instance they belong to. `login()` logs in again instead of using tokens of another user or instance, so one store can be shared safely. When the store fails, the connector logs a warning and continues with the tokens in memory.
 - Refresh tokens are long-lived credentials. Store them as securely as passwords, and use an `https://` instance URL with SSL verification enabled.
-- After the server rejects the credentials, the connector sends no further login, which could lock the account, until `login()` is called again.
+- After the server rejects the credentials, the connector sends no further login, which could lock the account, until `login()` is called again. Requests then fail with a `RequestException` that carries the HTTP status of the rejected login.
 - When the server rejects the access token with HTTP 401, the connector refreshes it and sends the request once more. The server answers 401 before it processes a request, so the request is not executed twice.
 - Login and refresh requests do not follow redirects, because a redirect would send the credentials to its target. A custom HTTP client must respect the `allow_redirects` request option for this.
 - Accounts with two-factor authentication cannot log in this way. Use a static token for them.

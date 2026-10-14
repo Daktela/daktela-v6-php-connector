@@ -335,11 +335,46 @@ class ApiCommunicatorLoginTest extends TestCase
     public function testFailedClientLoginKeepsPasswordOutOfTraces(): void
     {
         try {
-            // Nothing listens on the discard port, so the connection is refused at once
-            DaktelaClient::login('http://127.0.0.1:9', 'api', 'pw-SECRET-123');
+            // A password that is not valid UTF-8 fails before anything is sent
+            DaktelaClient::login('https://example.com', 'api', "pw-SECRET-\xB1");
             $this->fail('Expected RequestException');
         } catch (RequestException $ex) {
             $this->assertStringNotContainsString('pw-SECRET', self::exposed($ex));
+        }
+    }
+
+    public function testExportAndSerializationDoNotRevealCredentialsOrTokens(): void
+    {
+        $tokens = self::tokens('A');
+        $communicator = $this->communicator([self::tokenResponse($tokens)]);
+        $communicator->login('api', 'pw-SECRET-123', new InMemoryTokenStore());
+        // A Guzzle client with a handler stack cannot be serialized
+        $communicator->setHttpClient(null);
+
+        foreach ([var_export($communicator, true), serialize($communicator), print_r((array)$communicator, true)] as $text) {
+            $this->assertStringNotContainsString('pw-SECRET', $text);
+            $this->assertStringNotContainsString($tokens[0], $text);
+            $this->assertStringNotContainsString($tokens[1], $text);
+        }
+    }
+
+    public function testRejectedLoginErrorKeepsHttpStatus(): void
+    {
+        $communicator = $this->communicator([
+            new GuzzleResponse(401, [], '{}'),
+        ]);
+        try {
+            $communicator->login('api', 'wrong', null);
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+        }
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame(401, $ex->getHttpStatus());
+            $this->assertCount(1, $this->history);
         }
     }
 

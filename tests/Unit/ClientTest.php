@@ -363,11 +363,14 @@ class ClientTest extends TestCase
 
         $communicator = $client->getApiCommunicator();
         $this->assertNotSame(ApiCommunicator::getInstance('https://example.com', ''), $communicator);
-        $property = new \ReflectionProperty($communicator, 'accessToken');
-        if (PHP_VERSION_ID < 80100) {
-            $property->setAccessible(true);
-        }
-        $this->assertSame($accessToken, $property->getValue($communicator));
+        $history = [];
+        $stack = \GuzzleHttp\HandlerStack::create(new \GuzzleHttp\Handler\MockHandler([
+            new \GuzzleHttp\Psr7\Response(200, [], json_encode(['result' => ['data' => [], 'total' => 0]])),
+        ]));
+        $stack->push(\GuzzleHttp\Middleware::history($history));
+        $communicator->setHttpClient(new \GuzzleHttp\Client(['handler' => $stack]));
+        $client->execute(new ReadRequest('Users'));
+        $this->assertSame($accessToken, $history[0]['request']->getHeaderLine('X-AUTH-TOKEN'));
     }
 
     public function testPingDelegatesToCommunicator(): void

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Daktela\DaktelaV6\Http;
 
+use Daktela\DaktelaV6\Auth\LoginSession;
 use Daktela\DaktelaV6\Auth\TokenSet;
 use Daktela\DaktelaV6\Auth\TokenStore;
 use Daktela\DaktelaV6\Exception\NotFoundException;
@@ -98,18 +99,14 @@ class ApiCommunicator
     private ?RetryConfig $retryConfig = null;
     /** @var RateLimitConfig|null Rate limit configuration */
     private ?RateLimitConfig $rateLimitConfig = null;
-    /** @var TokenSet|null tokens of a login session, or null when a static access token is used */
-    private ?TokenSet $tokens = null;
-    /** @var TokenStore|null store that keeps the tokens of a login session */
-    private ?TokenStore $tokenStore = null;
-    /** @var array{username: string, password: string}|null credentials of a login session, kept to log in again */
-    private ?array $credentials = null;
-    /** @var bool whether the server rejected the credentials, so no further login is sent */
-    private bool $loginRejected = false;
-    /** @var bool whether the access token is refreshed before it expires, see useTokens() */
-    private bool $refreshBeforeExpiry = true;
-    /** @var string[] tokens replaced by a refresh, which are still redacted */
-    private array $retiredTokens = [];
+    /** @var \stdClass|null key of the login session of this object in $loginSessions */
+    private ?\stdClass $sessionKey = null;
+    /**
+     * @var \WeakMap<\stdClass, LoginSession>|null login sessions, kept outside the objects' properties so that
+     *     var_export(), serialize() and array casts cannot reveal their credentials and tokens. A clone shares
+     *     the session of the original; an unserialized copy has none.
+     */
+    private static ?\WeakMap $loginSessions = null;
 
     /**
      * ApiCommunicator constructor.
@@ -161,7 +158,7 @@ class ApiCommunicator
         try {
             return $this->dispatch($method, $apiEndpoint, $queryParams, $data, true);
         } catch (RequestException $ex) {
-            if ($this->tokens === null || $ex->getHttpStatus() !== 401) {
+            if ($this->session()?->tokens === null || $ex->getHttpStatus() !== 401) {
                 throw $ex;
             }
             // The server answers 401 before it processes a request, e.g. when it has ended the session,
@@ -186,17 +183,16 @@ class ApiCommunicator
      */
     public function login(string $username, #[\SensitiveParameter] string $password, ?TokenStore $tokenStore = null): void
     {
+        $session = new LoginSession($username, $password, $tokenStore);
         // PHP records the current values of the parameters in the trace of every exception created below
-        // this frame, so the password and the store (which holds tokens) are moved to properties
-        $this->credentials = ['username' => $username, 'password' => $password];
+        // this frame, so the password and the store (which holds tokens) are removed from them
         $password = '';
-        $this->tokenStore = $tokenStore;
         $tokenStore = null;
-        // A previous session must not survive a failed login
-        $this->tokens = null;
+        // A new key: a previous session must not survive a failed login
+        $this->sessionKey = new \stdClass();
+        self::$loginSessions ??= new \WeakMap();
+        self::$loginSessions[$this->sessionKey] = $session;
         $this->accessToken = '';
-        $this->retiredTokens = [];
-        $this->loginRejected = false;
 
         $stored = $this->loadStoredTokens();
         if ($stored !== null) {
@@ -207,6 +203,24 @@ class ApiCommunicator
     }
 
     /**
+     * @return LoginSession|null login session of this object, or null when a static access token is used
+     */
+    private function session(): ?LoginSession
+    {
+        return $this->sessionKey === null ? null : (self::$loginSessions[$this->sessionKey] ?? null);
+    }
+
+    /**
+     * @return string access token to authenticate requests with: the one of the login session, or the static one
+     */
+    private function currentAccessToken(): string
+    {
+        $session = $this->session();
+
+        return $session === null ? $this->accessToken : ($session->tokens?->getAccessToken() ?? '');
+    }
+
+    /**
      * Prepares a login session for a request: logs in when the session has no tokens, and refreshes an
      * access token that is about to expire. A refresh that fails, e.g. on a network error, leaves the
      * current access token in use until it expires.
@@ -214,14 +228,15 @@ class ApiCommunicator
      */
     private function prepareSession(): void
     {
-        if ($this->credentials === null) {
+        $session = $this->session();
+        if ($session === null) {
             return;
         }
-        if ($this->tokens === null) {
+        if ($session->tokens === null) {
             $this->loginWithCredentials();
             return;
         }
-        if (!$this->refreshBeforeExpiry || !$this->tokens->accessTokenExpiresWithin(self::TOKEN_REFRESH_MARGIN, time())) {
+        if (!$session->refreshBeforeExpiry || !$session->tokens->accessTokenExpiresWithin(self::TOKEN_REFRESH_MARGIN, time())) {
             return;
         }
         try {
@@ -241,7 +256,9 @@ class ApiCommunicator
      */
     private function hasValidAccessToken(): bool
     {
-        return $this->tokens !== null && !$this->tokens->accessTokenExpiresWithin(0, time());
+        $tokens = $this->session()?->tokens;
+
+        return $tokens !== null && !$tokens->accessTokenExpiresWithin(0, time());
     }
 
     /**
@@ -250,24 +267,29 @@ class ApiCommunicator
      */
     private function loginWithCredentials(): void
     {
-        if ($this->credentials === null) {
+        $session = $this->session();
+        if ($session === null) {
             throw new RequestException('There is no login session; call login() first.');
         }
-        if ($this->loginRejected) {
-            throw new RequestException('The server rejected the login; call login() again with valid credentials.');
+        if ($session->rejectedStatus !== null) {
+            throw new RequestException(
+                'The server rejected the login; call login() again with valid credentials.',
+                0,
+                null,
+                $session->rejectedStatus
+            );
         }
         try {
             $this->saveTokens($this->requestTokens('login'));
         } catch (RequestException $ex) {
             if ($ex->getHttpStatus() === 400 || $ex->getHttpStatus() === 401) {
                 // Repeating a rejected login could lock the account
-                $this->loginRejected = true;
-                $this->tokens = null;
-                $this->accessToken = '';
+                $session->rejectedStatus = $ex->getHttpStatus();
+                $session->tokens = null;
             }
             throw $ex;
         }
-        $this->logger?->info('Logged in to the Daktela API', ['username' => $this->credentials['username']]);
+        $this->logger?->info('Logged in to the Daktela API', ['username' => $session->username]);
     }
 
     /**
@@ -277,7 +299,7 @@ class ApiCommunicator
      */
     private function refreshTokens(): void
     {
-        $tokens = $this->tokens;
+        $tokens = $this->session()?->tokens;
         if ($tokens === null || $tokens->isRefreshTokenExpired(time())) {
             $this->loginWithCredentials();
             return;
@@ -296,7 +318,7 @@ class ApiCommunicator
 
     /**
      * Sends a login or token refresh request, which carries its credentials in the payload instead of the
-     * access token. The payload is built here from the properties, so that no frame in an exception trace
+     * access token. The payload is built here from the session, so that no frame in an exception trace
      * has the credentials as an argument, and the exceptions are created again in this frame, without the
      * HTTP client's exception (its request contains the payload) and without the trace below.
      * @param string $apiEndpoint login or refreshAccessToken
@@ -305,11 +327,12 @@ class ApiCommunicator
      */
     private function requestTokens(string $apiEndpoint): TokenSet
     {
-        $current = $this->tokens;
+        $session = $this->session();
+        $current = $session?->tokens;
         $payload = $apiEndpoint === 'login'
             ? [
-                'username' => $this->credentials['username'] ?? '',
-                'password' => $this->credentials['password'] ?? '',
+                'username' => $session === null ? '' : $session->username,
+                'password' => $session === null ? '' : $session->password,
                 // the tokens are returned instead of being set as cookies
                 'only_token' => 'true',
                 // the connector refreshes the session itself, the server does not renew it implicitly
@@ -361,7 +384,7 @@ class ApiCommunicator
      */
     private function sessionOwner(): string
     {
-        return ($this->credentials['username'] ?? '') . '@' . self::normalizeUrl($this->baseUrl);
+        return ($this->session()->username ?? '') . '@' . self::normalizeUrl($this->baseUrl);
     }
 
     /**
@@ -372,7 +395,7 @@ class ApiCommunicator
     private function loadStoredTokens(): ?TokenSet
     {
         try {
-            $stored = $this->tokenStore?->load();
+            $stored = $this->session()?->tokenStore?->load();
         } catch (\Exception $ex) {
             $this->logger?->warning('Loading the saved login session failed; logging in', [
                 'error' => $this->redact($ex->getMessage()),
@@ -396,7 +419,7 @@ class ApiCommunicator
     {
         $this->useTokens($tokens, true);
         try {
-            $this->tokenStore?->save($tokens);
+            $this->session()?->tokenStore?->save($tokens);
         } catch (\Exception $ex) {
             $this->logger?->warning('Saving the login session failed; it is kept in memory', [
                 'error' => $this->redact($ex->getMessage()),
@@ -410,29 +433,31 @@ class ApiCommunicator
      */
     private function useTokens(TokenSet $tokens, bool $received): void
     {
-        if ($this->tokens !== null) {
-            // Replaced tokens are still redacted, as later responses may repeat them
-            $replaced = [$this->tokens->getAccessToken(), $this->tokens->getRefreshToken()];
-            $this->retiredTokens = array_slice(array_values(array_unique(array_merge($replaced, $this->retiredTokens))), 0, 4);
+        $session = $this->session();
+        if ($session === null) {
+            return;
         }
-        $this->tokens = $tokens;
-        $this->accessToken = $tokens->getAccessToken();
+        if ($session->tokens !== null) {
+            // Replaced tokens are still redacted, as later responses may repeat them
+            $replaced = [$session->tokens->getAccessToken(), $session->tokens->getRefreshToken()];
+            $session->retiredTokens = array_slice(array_values(array_unique(array_merge($replaced, $session->retiredTokens))), 0, 4);
+        }
+        $session->tokens = $tokens;
         // A token that looks expired as soon as it is issued means the local clock is ahead of the server:
         // refreshing it before every request would not help, so it is refreshed after a 401 instead
-        $this->refreshBeforeExpiry = !$received || !$tokens->accessTokenExpiresWithin(self::TOKEN_REFRESH_MARGIN, time());
+        $session->refreshBeforeExpiry = !$received || !$tokens->accessTokenExpiresWithin(self::TOKEN_REFRESH_MARGIN, time());
     }
 
     /**
-     * Hides the access token, the credentials and the tokens of a login session from var_dump() and print_r().
-     * @return array properties of the object with the secrets replaced
+     * Hides the access token from var_dump() and print_r(). The credentials and tokens of a login session
+     * are not properties of this object at all.
+     * @return array properties of the object with the access token replaced
      */
     public function __debugInfo(): array
     {
         $properties = get_object_vars($this);
-        foreach (['accessToken', 'credentials', 'tokens', 'retiredTokens'] as $secret) {
-            if (!empty($properties[$secret])) {
-                $properties[$secret] = '***';
-            }
+        if (($properties['accessToken'] ?? '') !== '') {
+            $properties['accessToken'] = '***';
         }
 
         return $properties;
@@ -900,11 +925,15 @@ class ApiCommunicator
     private function redact(string $text): string
     {
         $forms = [];
-        $secrets = [$this->accessToken, trim($this->accessToken, " \t")];
-        if ($this->tokens !== null) {
-            $secrets[] = $this->tokens->getRefreshToken();
+        $accessToken = $this->currentAccessToken();
+        $secrets = [$accessToken, trim($accessToken, " \t"), $this->accessToken];
+        $session = $this->session();
+        if ($session !== null) {
+            if ($session->tokens !== null) {
+                $secrets[] = $session->tokens->getRefreshToken();
+            }
+            array_push($secrets, ...$session->retiredTokens);
         }
-        array_push($secrets, ...$this->retiredTokens);
         // Guzzle trims blanks from header values, so the server receives, and may echo, the trimmed token
         foreach (array_unique($secrets) as $token) {
             if ($token !== '') {
@@ -989,7 +1018,7 @@ class ApiCommunicator
 
         if ($authenticate
             && $this->authenticationMethod !== self::AUTHENTICATION_METHOD_QUERY
-            && preg_match('/[\x00-\x08\x0A-\x1F\x7F]/', $this->accessToken) === 1
+            && preg_match('/[\x00-\x08\x0A-\x1F\x7F]/', $this->currentAccessToken()) === 1
         ) {
             // Not a valid header value: Guzzle's error would quote the header value, trimmed, so redact() could miss it
             throw new RequestException('The access token contains a line break or another control character.');
@@ -997,11 +1026,11 @@ class ApiCommunicator
         if (!$authenticate) {
             // login and token refresh requests carry their credentials in the payload
         } elseif ($this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY) {
-            $queryParams['accessToken'] = $this->accessToken;
+            $queryParams['accessToken'] = $this->currentAccessToken();
         } elseif ($this->authenticationMethod === self::AUTHENTICATION_METHOD_BEARER) {
-            $headers['Authorization'] = 'Bearer ' . $this->accessToken;
+            $headers['Authorization'] = 'Bearer ' . $this->currentAccessToken();
         } else {
-            $headers['X-AUTH-TOKEN'] = $this->accessToken;
+            $headers['X-AUTH-TOKEN'] = $this->currentAccessToken();
         }
 
         // An instance URL that already ends with the API namespace is accepted, as before
@@ -1291,7 +1320,7 @@ class ApiCommunicator
 
         try {
             $response = $this->sendRequest('GET', 'whoim');
-            if ($this->tokens !== null && $response->isSuccess() && !$this->identifiesUser($response->getData())) {
+            if ($this->session()?->tokens !== null && $response->isSuccess() && !$this->identifiesUser($response->getData())) {
                 // whoim answers a login session the server has ended with no user instead of HTTP 401
                 $this->refreshTokens();
                 $response = $this->sendRequest('GET', 'whoim');

@@ -441,7 +441,7 @@ $health = $client->healthCheck();
 // Network failure: ['healthy' => false, 'latency_ms' => 2001.3, 'error' => 'cURL error 7: Failed to connect ...']
 ```
 
-`error` contains the first error message reported by the API, in the language of the token's user, or the transport error when no API error is available. `status_code` is missing when no HTTP response was received.
+`error` contains the first error message reported by the API, in the language of the token's user. Without one, it describes the problem: the token was not accepted, an HTTP error status, an unexpected response (for example, from a wrong instance URL), or the transport error. `status_code` is missing when no HTTP response was received.
 
 `whoim` also checks the state of the user account. For an account with an unfinished password change (its profile requires a one-time password and the new password was never set), it returns HTTP 400 `New password should be set`, although other endpoints still accept the token. Set the new password in the Daktela web interface to make the health check pass.
 

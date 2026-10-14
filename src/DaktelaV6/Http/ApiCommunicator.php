@@ -44,6 +44,10 @@ class ApiCommunicator
     private const CURL_ERRORS_BEFORE_SEND = [6, 7, 35];
     /** @var string Health check error used when the API answers without identifying the token's user */
     private const TOKEN_NOT_ACCEPTED_ERROR = 'The access token was not accepted: the API did not identify a user.';
+    /** @var string Health check error used for an HTTP error response that carries no API error */
+    private const HTTP_ERROR_WITHOUT_MESSAGE = 'The API answered HTTP %d without an error message.';
+    /** @var string Health check error used for a successful response that is not a whoim response */
+    private const UNEXPECTED_RESPONSE_ERROR = 'The API returned an unexpected response without user information; check the instance URL.';
     /** @var array static variable containing all singleton instances of the transport class */
     private static $singletons = [];
     /** @var string URL of the Daktela instance */
@@ -295,6 +299,27 @@ class ApiCommunicator
     private function identifiesUser(mixed $data): bool
     {
         return is_object($data) && ($data->user ?? null) !== null;
+    }
+
+    /**
+     * Explains why a whoim response that was received is not healthy.
+     * @param Response $response whoim response that does not identify a user
+     * @return string the API error, or a description of the response when the API reported none
+     */
+    private function describeUnhealthyResponse(Response $response): string
+    {
+        $apiError = $this->firstErrorMessage($response->getErrors());
+        if ($apiError !== null) {
+            // Only text received from the API can contain the token
+            return $this->redact($apiError);
+        }
+        if (!$response->isSuccess()) {
+            return sprintf(self::HTTP_ERROR_WITHOUT_MESSAGE, $response->getHttpStatus());
+        }
+        $data = $response->getData();
+
+        // whoim always returns the user member; it is null when the token was not accepted
+        return is_object($data) && property_exists($data, 'user') ? self::TOKEN_NOT_ACCEPTED_ERROR : self::UNEXPECTED_RESPONSE_ERROR;
     }
 
     /**
@@ -657,9 +682,7 @@ class ApiCommunicator
             'status_code' => $response->getHttpStatus(),
         ];
         if (!$result['healthy']) {
-            // Only text received from the API can contain the token
-            $apiError = $this->firstErrorMessage($response->getErrors());
-            $result['error'] = $apiError !== null ? $this->redact($apiError) : self::TOKEN_NOT_ACCEPTED_ERROR;
+            $result['error'] = $this->describeUnhealthyResponse($response);
         }
 
         return $result;

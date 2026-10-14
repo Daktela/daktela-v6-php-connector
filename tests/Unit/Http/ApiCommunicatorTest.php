@@ -664,8 +664,15 @@ class ApiCommunicatorTest extends TestCase
     public function testHealthCheckReportsApiErrorForPendingPasswordChange(): void
     {
         // The body as the API sends it: translated message with JSON-escaped non-ASCII characters
-        $body = '{"error":{"error":"Koniecznie ustaw nowe hasło"},"result":null,'
-            . '"_serverTime":"2026-05-28 13:32:25","_time":"2026-05-28 13:32:25","_timezone":"Europe/Warsaw"}';
+        // (json_encode() escapes them by default, as PHP does on the server)
+        $body = json_encode([
+            'error' => ['error' => 'Koniecznie ustaw nowe hasło'],
+            'result' => null,
+            '_serverTime' => '2026-05-28 13:32:25',
+            '_time' => '2026-05-28 13:32:25',
+            '_timezone' => 'Europe/Warsaw',
+        ]);
+        $this->assertStringContainsString('has\\u0142o', $body, 'The fixture must carry the escaped form the API sends');
         $communicator = new ApiCommunicator('https://example.com', 'token');
         $communicator->setHttpClient($this->createMockClient([
             new GuzzleResponse(400, [], $body),
@@ -721,6 +728,39 @@ class ApiCommunicatorTest extends TestCase
         $this->assertFalse($result['healthy']);
         $this->assertSame(400, $result['status_code']);
         $this->assertSame('New password should be set', $result['error']);
+    }
+
+    public function testHealthCheckReportsHttpStatusForErrorResponseWithoutApiError(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient(new Client([
+            'handler' => HandlerStack::create(new MockHandler([
+                new GuzzleResponse(503, [], json_encode(['message' => 'Service Unavailable'])),
+            ])),
+            'http_errors' => false,
+        ]));
+
+        $result = $communicator->healthCheck();
+
+        $this->assertFalse($result['healthy']);
+        $this->assertSame(503, $result['status_code']);
+        $this->assertSame('The API answered HTTP 503 without an error message.', $result['error']);
+    }
+
+    public function testHealthCheckReportsUnexpectedResponseWithoutUserInformation(): void
+    {
+        // e.g. an instance URL that points to a server other than Daktela
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([new GuzzleResponse(200, [], '{}')]));
+
+        $result = $communicator->healthCheck();
+
+        $this->assertFalse($result['healthy']);
+        $this->assertSame(200, $result['status_code']);
+        $this->assertSame(
+            'The API returned an unexpected response without user information; check the instance URL.',
+            $result['error']
+        );
     }
 
     private function connectError(int $errno): ConnectException

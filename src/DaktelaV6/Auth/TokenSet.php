@@ -56,7 +56,7 @@ final class TokenSet
      * Restores tokens saved with toArray(), e.g. by a TokenStore.
      * @param array $data array returned by toArray()
      * @return self restored tokens
-     * @throws InvalidArgumentException when the array does not contain both tokens
+     * @throws InvalidArgumentException when the array does not contain both tokens, or one of them is empty
      */
     public static function fromArray(#[\SensitiveParameter] array $data): self
     {

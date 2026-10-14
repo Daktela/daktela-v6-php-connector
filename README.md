@@ -239,7 +239,7 @@ $httpStatus =   $response->getHttpStatus();
 
 ## Handling exceptions
 
-Transport failures and, with Guzzle's default `http_errors` setting, non-retryable HTTP 4xx/5xx responses are wrapped in `Daktela\DaktelaV6\Exception\RequestException`. HTTP 429 responses use the more specific `RateLimitException`, which extends `RequestException` and returns 429 from `getHttpStatus()`.
+Transport failures and, with Guzzle's default `http_errors` setting, non-retryable HTTP 4xx/5xx responses are wrapped in `Daktela\DaktelaV6\Exception\RequestException`. Other exceptions of the HTTP client, for example from a custom client, are wrapped in `RequestException` without a previous exception. HTTP 429 responses use the more specific `RateLimitException`, which extends `RequestException` and returns 429 from `getHttpStatus()`.
 
 HTTP 404 responses throw `NotFoundException`, which also extends `RequestException`. For HTTP errors, the exception exposes the response details:
 
@@ -312,13 +312,25 @@ $client = Client::login($instance, $username, $password, new FileTokenStore('/va
 ```
 
 - The password is kept in memory to log in again. The connector never stores it. It keeps the password and the tokens out of the traces of the exceptions it throws, and out of `var_dump()`, `print_r()`, `var_export()`, and `serialize()` output. An unserialized copy of a client has no login session.
-- Saved tokens record the user and instance they belong to. `login()` logs in again instead of using tokens of another user or instance, so one store can be shared safely. When the store fails, the connector logs a warning and continues with the tokens in memory.
+- Saved tokens record the user and instance they belong to. `login()` logs in again instead of using tokens of another user or instance, so one store can be shared safely. When the store fails to load, the connector logs a warning and logs in. When it fails to save, the connector logs a warning and keeps the tokens in memory.
 - Refresh tokens are long-lived credentials. Store them as securely as passwords, and use an `https://` instance URL with SSL verification enabled.
 - After the server rejects the credentials, the connector sends no further login, which could lock the account, until `login()` is called again. Requests then fail with a `RequestException` that carries the HTTP status of the rejected login.
 - When the server rejects the access token with HTTP 401, the connector refreshes it and sends the request once more. The server answers 401 before it processes a request, so the request is not executed twice.
 - Login and refresh requests do not follow redirects, because a redirect would send the credentials to its target. A custom HTTP client must respect the `allow_redirects` request option for this.
 - Accounts with two-factor authentication cannot log in this way. Use a static token for them.
-- To configure the transport before the login (timeout, retries, ...), call `login()` on your own `ApiCommunicator` and pass it to the `Client` constructor.
+- When the server has ended the session, `healthCheck()` refreshes it and checks again before it reports the token as not accepted.
+- To configure the transport before the login (timeout, retries, ...), call `login()` on your own `ApiCommunicator` and pass it to the `Client` constructor:
+
+```php
+use Daktela\DaktelaV6\Client;
+use Daktela\DaktelaV6\Http\ApiCommunicator;
+
+$communicator = new ApiCommunicator($instance, '');
+$communicator->setRequestTimeout(30.0);
+$communicator->login($username, $password);
+
+$client = new Client($instance, '', $communicator);
+```
 
 ## Authentication Methods
 
@@ -592,7 +604,7 @@ docker run --rm -v "$PWD:/app" -w /app --entrypoint php composer:2 \
 The full suite also contains live API integration tests, which are skipped unless their environment variables are set:
 
 - The request tests need `INSTANCE`, `ACCESS_TOKEN`, and `RECORD_TYPE`.
-- The health check tests need `INSTANCE` and `ACCESS_TOKEN`. The Bearer test requires Daktela 31.37.0, 32.36.0, 33.14.0, or later.
-- The login test also needs `LOGIN_USERNAME` and `LOGIN_PASSWORD` of an account without two-factor authentication.
+- The health check tests need `INSTANCE`. The static token tests also need `ACCESS_TOKEN`, and the Bearer test requires Daktela 31.37.0, 32.36.0, 33.14.0, or later.
+- The login tests need `INSTANCE`, `LOGIN_USERNAME`, and `LOGIN_PASSWORD` of an account without two-factor authentication.
 
 CI tests supported PHP versions and enforces at least 90% line coverage for the deterministic unit suite.

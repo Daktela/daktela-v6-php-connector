@@ -6,7 +6,7 @@ All notable changes to this project are documented in this file. The project fol
 
 ### Security
 
-- Wrapped every other exception of the HTTP client, such as an invalid redirect URL or an exception of a custom client, in a `RequestException` with the access token redacted and no previous exception, because its own previous exceptions may carry the token. Previously, it reached the caller unchanged, so its message could contain the token and `ping()` and `healthCheck()` threw it.
+- Wrapped every other exception of the HTTP client, such as an exception of a custom client, in a `RequestException` with the access token redacted. A Guzzle request exception is chained as a copy without the token; any other exception is not chained, because its own previous exceptions may carry the token. Previously, it reached the caller unchanged, so its message could contain the token and `ping()` and `healthCheck()` threw it.
 - Replaced the truncated body summary in messages of other Guzzle exceptions with the summary of the redacted body, so a token cut at the 120-byte limit no longer leaves a fragment.
 - Redacted the access token in the keys of decoded API errors, not only in their values.
 
@@ -20,6 +20,8 @@ All notable changes to this project are documented in this file. The project fol
 - Reported an HTTP error response whose body cannot be read as a `RequestException` with an empty body, instead of a `RuntimeException`.
 - Used the `Retry-After` header of an HTTP 429 response without a `RateLimitConfig`. `RateLimitException::getRetryAfterSeconds()` previously reported the default 5 seconds.
 - Reported a request payload that cannot be encoded as JSON, such as a string that is not valid UTF-8, as a `RequestException` instead of Guzzle's `InvalidArgumentException`.
+
+No public method signatures were changed in this release. The login methods and the `Auth` classes are additive. Review the Security section if your code reads `getPrevious()` of a `RequestException` for an exception of a custom HTTP client, and the Fixed section if your code catches Guzzle's `InvalidArgumentException` for a payload that cannot be encoded as JSON.
 
 ## [2.7.1] - 2026-10-14
 

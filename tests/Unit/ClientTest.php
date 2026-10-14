@@ -357,7 +357,7 @@ class ClientTest extends TestCase
     {
         $accessToken = \Daktela\Tests\Unit\Auth\TokenSetTest::jwt(time() + 3600);
         $store = new InMemoryTokenStore();
-        $store->save(TokenSet::fromTokens($accessToken, \Daktela\Tests\Unit\Auth\TokenSetTest::jwt(time() + 86400)));
+        $store->save(TokenSet::fromTokens($accessToken, \Daktela\Tests\Unit\Auth\TokenSetTest::jwt(time() + 86400), 'api@https://example.com'));
 
         $client = Client::login('https://example.com', 'api', 'password', $store);
 

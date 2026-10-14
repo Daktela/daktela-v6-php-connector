@@ -15,17 +15,27 @@ use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use PHPUnit\Framework\TestCase;
+use Psr\Http\Message\RequestInterface;
 
 class ApiCommunicatorLoginTest extends TestCase
 {
+    /** @var string owner of the tokens of a session that logs in as api on https://example.com */
+    private const OWNER = 'api@https://example.com';
+
     /** @var array history of the requests sent through the mock client */
     private array $history = [];
 
     private function communicator(array $responses): ApiCommunicator
     {
         $this->history = [];
-        $stack = HandlerStack::create(new MockHandler($responses));
-        $stack->push(Middleware::history($this->history));
+        $mock = new MockHandler($responses);
+        $history = &$this->history;
+        // Recorded at the network handler, so redirected requests are recorded too
+        $stack = HandlerStack::create(static function (RequestInterface $request, array $options) use ($mock, &$history) {
+            $history[] = ['request' => $request];
+
+            return $mock($request, $options);
+        });
         $communicator = new ApiCommunicator('https://example.com', '');
         $communicator->setHttpClient(new Client(['handler' => $stack]));
 
@@ -52,7 +62,7 @@ class ApiCommunicatorLoginTest extends TestCase
         return new GuzzleResponse(200, [], json_encode(['error' => [], 'result' => ['data' => [], 'total' => 0]]));
     }
 
-    private function request(int $index): \Psr\Http\Message\RequestInterface
+    private function request(int $index): RequestInterface
     {
         return $this->history[$index]['request'];
     }
@@ -95,7 +105,7 @@ class ApiCommunicatorLoginTest extends TestCase
         $old = self::tokens('A', 30);
         $new = self::tokens('B');
         $store = new InMemoryTokenStore();
-        $store->save(TokenSet::fromTokens($old[0], $old[1]));
+        $store->save(TokenSet::fromTokens($old[0], $old[1], self::OWNER));
         $communicator = $this->communicator([self::tokenResponse($new), self::okResponse()]);
 
         $communicator->login('api', 'password', $store);
@@ -114,7 +124,7 @@ class ApiCommunicatorLoginTest extends TestCase
         $old = self::tokens('A');
         $new = self::tokens('B');
         $store = new InMemoryTokenStore();
-        $store->save(TokenSet::fromTokens($old[0], $old[1]));
+        $store->save(TokenSet::fromTokens($old[0], $old[1], self::OWNER));
         $communicator = $this->communicator([new GuzzleResponse(401, [], '{}'), self::tokenResponse($new), self::okResponse()]);
 
         $communicator->login('api', 'password', $store);
@@ -132,7 +142,7 @@ class ApiCommunicatorLoginTest extends TestCase
     {
         $old = self::tokens('A');
         $store = new InMemoryTokenStore();
-        $store->save(TokenSet::fromTokens($old[0], $old[1]));
+        $store->save(TokenSet::fromTokens($old[0], $old[1], self::OWNER));
         $communicator = $this->communicator([
             new GuzzleResponse(401, [], '{}'),
             self::tokenResponse(self::tokens('B')),
@@ -154,7 +164,7 @@ class ApiCommunicatorLoginTest extends TestCase
         $old = self::tokens('A', 30);
         $new = self::tokens('C');
         $store = new InMemoryTokenStore();
-        $store->save(TokenSet::fromTokens($old[0], $old[1]));
+        $store->save(TokenSet::fromTokens($old[0], $old[1], self::OWNER));
         $communicator = $this->communicator([
             new GuzzleResponse(400, [], json_encode(['error' => ['Invalid refresh token or token expired']])),
             self::tokenResponse($new),
@@ -174,7 +184,7 @@ class ApiCommunicatorLoginTest extends TestCase
         $old = self::tokens('A', -100, -10);
         $new = self::tokens('B');
         $store = new InMemoryTokenStore();
-        $store->save(TokenSet::fromTokens($old[0], $old[1]));
+        $store->save(TokenSet::fromTokens($old[0], $old[1], self::OWNER));
         $communicator = $this->communicator([self::tokenResponse($new), self::okResponse()]);
 
         $communicator->login('api', 'password', $store);
@@ -198,6 +208,70 @@ class ApiCommunicatorLoginTest extends TestCase
             $this->assertSame(400, $ex->getHttpStatus());
             $this->assertSame(['Invalid username or password'], $ex->getApiErrors());
             $this->assertStringNotContainsString('pw-SECRET', $ex->getMessage());
+        }
+    }
+
+    /**
+     * @dataProvider foreignOwners
+     */
+    public function testStoredTokensOfAnotherSessionAreNotUsed(?string $owner): void
+    {
+        $foreign = self::tokens('X');
+        $own = self::tokens('A');
+        $store = new InMemoryTokenStore();
+        $store->save(TokenSet::fromTokens($foreign[0], $foreign[1], $owner));
+        $communicator = $this->communicator([self::tokenResponse($own), self::okResponse()]);
+
+        $communicator->login('api', 'password', $store);
+        $communicator->sendRequest('GET', 'Users');
+
+        $this->assertSame('/api/v6/login.json', $this->request(0)->getUri()->getPath());
+        $this->assertSame($own[0], $this->request(1)->getHeaderLine('X-AUTH-TOKEN'));
+        $this->assertSame(self::OWNER, $store->load()->getOwner());
+    }
+
+    public static function foreignOwners(): array
+    {
+        return [
+            'another user' => ['admin@https://example.com'],
+            'another instance' => ['api@https://other.example.org'],
+            'saved without owner' => [null],
+        ];
+    }
+
+    public function testLoginDoesNotFollowRedirectsWithCredentials(): void
+    {
+        // A 307/308 redirect would re-send the payload, which holds the password, to the redirect target
+        $communicator = $this->communicator([
+            new GuzzleResponse(307, ['Location' => 'https://other.example.org/api/v6/login.json']),
+            self::tokenResponse(self::tokens('A')),
+        ]);
+
+        try {
+            $communicator->login('api', 'password', null);
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertCount(1, $this->history);
+        }
+    }
+
+    public function testRefreshDoesNotFollowRedirectsWithRefreshToken(): void
+    {
+        $old = self::tokens('A', 30);
+        $store = new InMemoryTokenStore();
+        $store->save(TokenSet::fromTokens($old[0], $old[1], self::OWNER));
+        $communicator = $this->communicator([
+            new GuzzleResponse(308, ['Location' => 'https://other.example.org/api/v6/refreshAccessToken.json']),
+            self::tokenResponse(self::tokens('B')),
+        ]);
+        $communicator->login('api', 'password', $store);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertCount(1, $this->history);
+            $this->assertSame('/api/v6/refreshAccessToken.json', $this->request(0)->getUri()->getPath());
         }
     }
 

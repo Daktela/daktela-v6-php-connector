@@ -184,7 +184,10 @@ class ApiCommunicator
         $this->credentials = ['username' => $username, 'password' => $password];
         $this->tokenStore = $tokenStore;
         $stored = $tokenStore?->load();
-        if ($stored !== null && !$stored->isRefreshTokenExpired(time())) {
+        // A store shared by several users or instances must not resume the session of another one
+        if ($stored !== null && $stored->getOwner() === $this->sessionOwner()
+            && !$stored->isRefreshTokenExpired(time())
+        ) {
             $this->useTokens($stored);
             return;
         }
@@ -256,7 +259,15 @@ class ApiCommunicator
             throw new RequestException('The login response does not contain an access token and a refresh token.');
         }
 
-        return TokenSet::fromTokens($result->accessToken, $result->refreshToken);
+        return TokenSet::fromTokens($result->accessToken, $result->refreshToken, $this->sessionOwner());
+    }
+
+    /**
+     * @return string session the tokens of the login belong to, as `username@instance URL`
+     */
+    private function sessionOwner(): string
+    {
+        return ($this->credentials['username'] ?? '') . '@' . self::normalizeUrl($this->baseUrl);
     }
 
     /**
@@ -296,6 +307,8 @@ class ApiCommunicator
     ): Response {
         $client = $this->httpClient ?? $this->createDefaultClient();
         $request = $this->buildRequest($method, $apiEndpoint, $queryParams, $data, $authenticate);
+        // Login and refresh payloads hold credentials, which a 307/308 redirect would send to its target
+        $sendOptions = $authenticate ? [] : ['allow_redirects' => false];
 
         $retryCount = $this->retryConfig?->getMaxRetries() ?? 0;
         $rateLimitRetryCount = $this->rateLimitConfig?->shouldAutoRetry() ? max(1, $retryCount) : 0;
@@ -328,7 +341,7 @@ class ApiCommunicator
 
             $httpException = null;
             try {
-                $httpResponse = $client->send($request);
+                $httpResponse = $client->send($request, $sendOptions);
             } catch (BadResponseException $ex) {
                 // Guzzle throws for 4xx/5xx by default. Keep the exception so
                 // non-retryable errors retain their historical behavior, but

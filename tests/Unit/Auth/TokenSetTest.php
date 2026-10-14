@@ -61,6 +61,14 @@ class TokenSetTest extends TestCase
         $this->assertSame(1000, $copy->getAccessTokenExpiresAt());
     }
 
+    public function testKeepsOwnerInArray(): void
+    {
+        $tokens = TokenSet::fromTokens('access', 'refresh', 'api@https://example.com');
+
+        $this->assertSame('api@https://example.com', TokenSet::fromArray($tokens->toArray())->getOwner());
+        $this->assertNull(TokenSet::fromArray(['accessToken' => 'a', 'refreshToken' => 'r'])->getOwner());
+    }
+
     public function testRejectsArrayWithoutTokens(): void
     {
         $this->expectException(InvalidArgumentException::class);

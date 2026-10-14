@@ -12,7 +12,7 @@ All notable changes to this project are documented in this file. The project fol
 
 ### Added
 
-- `Client::login()` and `ApiCommunicator::login()` to start a session with a username and password instead of a static access token. The connector refreshes the short-lived access token before it expires and after the server rejects it, and logs in again when the session has ended. A `TokenStore` keeps the session across processes; `InMemoryTokenStore` and the `TokenSet` value object are included. Accounts with two-factor authentication cannot log in this way.
+- `Client::login()` and `ApiCommunicator::login()` to start a session with a username and password instead of a static access token. The connector refreshes the short-lived access token before it expires and after the server rejects it, and logs in again when the session has ended. A `TokenStore` keeps the session across processes; `InMemoryTokenStore` and the `TokenSet` value object are included. Stored tokens record the user and instance they belong to and are not used for another one. Login and refresh requests do not follow redirects, which would send the credentials to the redirect target. Accounts with two-factor authentication cannot log in this way.
 
 ### Fixed
 

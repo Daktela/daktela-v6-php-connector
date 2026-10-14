@@ -18,12 +18,14 @@ final class TokenSet
     private string $refreshToken;
     private ?int $accessTokenExpiresAt;
     private ?int $refreshTokenExpiresAt;
+    private ?string $owner;
 
     private function __construct(
         string $accessToken,
         string $refreshToken,
         ?int $accessTokenExpiresAt,
-        ?int $refreshTokenExpiresAt
+        ?int $refreshTokenExpiresAt,
+        ?string $owner
     ) {
         if ($accessToken === '' || $refreshToken === '') {
             throw new InvalidArgumentException('Access token and refresh token must not be empty');
@@ -32,16 +34,18 @@ final class TokenSet
         $this->refreshToken = $refreshToken;
         $this->accessTokenExpiresAt = $accessTokenExpiresAt;
         $this->refreshTokenExpiresAt = $refreshTokenExpiresAt;
+        $this->owner = $owner;
     }
 
     /**
      * @param string $accessToken access token returned by the API
      * @param string $refreshToken refresh token returned by the API
+     * @param string|null $owner session the tokens were issued for, as `username@instance URL`
      * @return self tokens with the expiry read from their `exp` claims
      */
-    public static function fromTokens(string $accessToken, string $refreshToken): self
+    public static function fromTokens(string $accessToken, string $refreshToken, ?string $owner = null): self
     {
-        return new self($accessToken, $refreshToken, self::expiry($accessToken), self::expiry($refreshToken));
+        return new self($accessToken, $refreshToken, self::expiry($accessToken), self::expiry($refreshToken), $owner);
     }
 
     /**
@@ -56,15 +60,30 @@ final class TokenSet
             throw new InvalidArgumentException('Saved tokens must contain accessToken and refreshToken');
         }
 
-        return self::fromTokens($data['accessToken'], $data['refreshToken']);
+        $owner = is_string($data['owner'] ?? null) ? $data['owner'] : null;
+
+        return self::fromTokens($data['accessToken'], $data['refreshToken'], $owner);
     }
 
     /**
-     * @return array{accessToken: string, refreshToken: string} tokens to be saved, e.g. as JSON
+     * @return array{accessToken: string, refreshToken: string, owner?: string} tokens to be saved, e.g. as JSON
      */
     public function toArray(): array
     {
-        return ['accessToken' => $this->accessToken, 'refreshToken' => $this->refreshToken];
+        $data = ['accessToken' => $this->accessToken, 'refreshToken' => $this->refreshToken];
+        if ($this->owner !== null) {
+            $data['owner'] = $this->owner;
+        }
+
+        return $data;
+    }
+
+    /**
+     * @return string|null session the tokens were issued for, as `username@instance URL`, or null when unknown
+     */
+    public function getOwner(): ?string
+    {
+        return $this->owner;
     }
 
     public function getAccessToken(): string

@@ -310,6 +310,8 @@ $client = Client::login($instance, $username, $password, new FileTokenStore('/va
 ```
 
 - The password is kept in memory to log in again. The connector never stores it.
+- Saved tokens record the user and instance they belong to. `login()` logs in again instead of using tokens of another user or instance, so one store can be shared safely.
+- Login and refresh requests do not follow redirects, because a redirect would send the credentials to its target.
 - Refresh tokens are long-lived credentials. Store them as securely as passwords.
 - Accounts with two-factor authentication cannot log in this way. Use a static token for them.
 - To configure the transport before the login (timeout, retries, ...), call `login()` on your own `ApiCommunicator` and pass it to the `Client` constructor.

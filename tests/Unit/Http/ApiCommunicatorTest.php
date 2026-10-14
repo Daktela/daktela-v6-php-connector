@@ -188,6 +188,17 @@ class ApiCommunicatorTest extends TestCase
         );
     }
 
+    public function testSetAuthenticationMethodBearer(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_BEARER);
+
+        $this->assertSame(
+            ApiCommunicator::AUTHENTICATION_METHOD_BEARER,
+            $this->getPrivateProperty($communicator, 'authenticationMethod')
+        );
+    }
+
     public function testSetAuthenticationMethodInvalid(): void
     {
         $this->expectException(RequestException::class);
@@ -494,6 +505,43 @@ class ApiCommunicatorTest extends TestCase
         parse_str($request->getUri()->getQuery(), $query);
         $this->assertSame(['take' => '5', 'accessToken' => 'secret-token'], $query);
         $this->assertFalse($request->hasHeader('X-AUTH-TOKEN'));
+    }
+
+    public function testBuildsBearerAuthenticatedRequest(): void
+    {
+        $history = [];
+        $mockClient = $this->createMockClient([
+            new GuzzleResponse(200, [], json_encode(['result' => ['data' => null]])),
+        ], $history);
+
+        $communicator = new ApiCommunicator('https://example.com', 'secret-token');
+        $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_BEARER);
+        $communicator->setHttpClient($mockClient);
+        $communicator->sendRequest('GET', 'Users', ['take' => 5]);
+
+        $request = $history[0]['request'];
+        $this->assertSame('Bearer secret-token', $request->getHeaderLine('Authorization'));
+        $this->assertFalse($request->hasHeader('X-AUTH-TOKEN'));
+        $this->assertSame('take=5', $request->getUri()->getQuery());
+    }
+
+    public function testBearerAuthenticationKeepsTokenOutOfErrors(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_BEARER);
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(401, [], json_encode(['error' => ['Token SECRET is not valid']])),
+        ]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('RequestException was not thrown');
+        } catch (RequestException $ex) {
+            $this->assertSame(401, $ex->getHttpStatus());
+            $this->assertStringNotContainsString('SECRET', $ex->getMessage());
+            $this->assertStringNotContainsString('SECRET', (string)$ex->getResponseBody());
+            $this->assertSame(['Token *** is not valid'], $ex->getApiErrors());
+        }
     }
 
     public function testSendRequestRejectsInvalidJson(): void

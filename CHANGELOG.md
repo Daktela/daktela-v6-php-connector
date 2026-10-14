@@ -8,6 +8,10 @@ All notable changes to this project are documented in this file. The project fol
 
 - Made `ping()` and `healthCheck()` report an invalid, expired, or revoked access token as unhealthy. The `whoim` endpoint answers such requests with HTTP 200 and no user, which the health check previously reported as healthy; it now requires the response to identify a user.
 
+### Added
+
+- `ApiCommunicator::AUTHENTICATION_METHOD_BEARER` to send the access token in the standard `Authorization: Bearer` header, which the Daktela API documentation recommends. It requires Daktela 31.37.0, 32.36.0, 33.14.0, or later. The default method is still the `X-AUTH-TOKEN` header.
+
 ### Changed
 
 - `healthCheck()` now reports the first error message returned by the API (for example `New password should be set`) as `error`, and includes `status_code` for HTTP error responses. Previously, `error` contained the HTTP client's message with a truncated response body, and `status_code` was missing.

@@ -27,10 +27,12 @@ use Throwable;
  */
 class ApiCommunicator
 {
-    /** @var int Authentication method using HTTP header X-AUTH-TOKEN */
+    /** @var int Authentication method using HTTP header X-AUTH-TOKEN (default; legacy in the Daktela API docs) */
     const AUTHENTICATION_METHOD_HEADER = 1;
     /** @var int Authentication method using query parameter accessToken */
     const AUTHENTICATION_METHOD_QUERY = 2;
+    /** @var int Authentication method using HTTP header Authorization: Bearer (Daktela 31.37.0, 32.36.0, 33.14.0 and later) */
+    const AUTHENTICATION_METHOD_BEARER = 3;
     
     /** @var string Constant defining the base API URL */
     private const API_NAMESPACE = "/api/v6/";
@@ -418,6 +420,8 @@ class ApiCommunicator
 
         if ($this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY) {
             $queryParams['accessToken'] = $this->accessToken;
+        } elseif ($this->authenticationMethod === self::AUTHENTICATION_METHOD_BEARER) {
+            $headers['Authorization'] = 'Bearer ' . $this->accessToken;
         } else {
             $headers['X-AUTH-TOKEN'] = $this->accessToken;
         }
@@ -527,7 +531,8 @@ class ApiCommunicator
      */
     public function setAuthenticationMethod(int $authenticationMethod): void
     {
-        if ($authenticationMethod !== self::AUTHENTICATION_METHOD_HEADER && $authenticationMethod !== self::AUTHENTICATION_METHOD_QUERY) {
+        $methods = [self::AUTHENTICATION_METHOD_HEADER, self::AUTHENTICATION_METHOD_QUERY, self::AUTHENTICATION_METHOD_BEARER];
+        if (!in_array($authenticationMethod, $methods, true)) {
             throw new RequestException('Invalid authentication method');
         }
         $this->authenticationMethod = $authenticationMethod;

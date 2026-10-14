@@ -262,11 +262,11 @@ The access token is replaced with `***` in exception messages, the stored respon
 
 ## Authentication Methods
 
-The connector supports two authentication methods for passing the access token to the Daktela V6 API:
+The connector supports three ways of passing the access token to the Daktela V6 API. It sends the token in exactly one of them.
 
-### 1. Header-based Authentication (Default)
+### 1. X-AUTH-TOKEN Header (Default)
 
-By default, the access token is sent via the `X-AUTH-TOKEN` HTTP header. This is the recommended method as it keeps the token out of URLs and logs.
+By default, the access token is sent in the `X-AUTH-TOKEN` HTTP header. Every Daktela V6 version accepts it, so it remains the default. The Daktela API documentation lists it as a legacy header in favour of `Authorization: Bearer`, but it is still supported.
 
 ```php
 use Daktela\DaktelaV6\Client;
@@ -274,7 +274,21 @@ $client = new Client($instance, $accessToken);
 // Token is automatically sent via X-AUTH-TOKEN header
 ```
 
-### 2. Query Parameter Authentication
+### 2. Authorization: Bearer Header
+
+The standard `Authorization: Bearer <token>` header is the method the Daktela API documentation recommends. It requires Daktela 31.37.0, 32.36.0, 33.14.0, or later. Older versions do not read this header and answer HTTP 401.
+
+```php
+use Daktela\DaktelaV6\Client;
+use Daktela\DaktelaV6\Http\ApiCommunicator;
+
+$client = new Client($instance, $accessToken);
+$client->getApiCommunicator()->setAuthenticationMethod(
+    ApiCommunicator::AUTHENTICATION_METHOD_BEARER
+);
+```
+
+### 3. Query Parameter Authentication
 
 Alternatively, you can send the access token as a query parameter (`accessToken`). This method may be useful for compatibility with certain proxy configurations or firewall rules.
 
@@ -288,7 +302,7 @@ $client->getApiCommunicator()->setAuthenticationMethod(
 );
 ```
 
-To switch back to header-based authentication:
+To switch back to the default header:
 
 ```php
 $client->getApiCommunicator()->setAuthenticationMethod(
@@ -296,7 +310,7 @@ $client->getApiCommunicator()->setAuthenticationMethod(
 );
 ```
 
-**Security Note:** Header-based authentication is recommended for production use as it prevents the access token from appearing in server logs, browser history, and other places where URLs are typically recorded.
+**Security Note:** Use one of the header methods in production. They keep the access token out of server logs, browser history, and other places where URLs are typically recorded.
 
 ## Advanced Configuration
 

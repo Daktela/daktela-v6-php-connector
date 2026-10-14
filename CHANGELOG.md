@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file. The project fol
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-10-14
+
 ### Security
 
 - Wrapped every other exception of the HTTP client, such as an exception of a custom client, in a `RequestException` with the access token redacted. A Guzzle request exception is chained as a copy without the token; any other exception is not chained, because its own previous exceptions may carry the token. Previously, it reached the caller unchanged, so its message could contain the token and `ping()` and `healthCheck()` threw it.
@@ -132,7 +134,8 @@ Public methods only gained optional parameters, and `ARequest::getResponse()` wi
 
 No public method signatures were changed in this release. The dependency minimums in the Security section are the only compatibility-sensitive upgrade requirement.
 
-[Unreleased]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.7.1...HEAD
+[Unreleased]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.8.0...HEAD
+[2.8.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.7.1...2.8.0
 [2.7.1]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.7.0...2.7.1
 [2.7.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.6.0...2.7.0
 [2.6.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.5.0...2.6.0

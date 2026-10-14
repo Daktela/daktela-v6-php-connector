@@ -83,6 +83,25 @@ class TokenSetTest extends TestCase
         TokenSet::fromTokens('', 'refresh');
     }
 
+    /**
+     * @requires PHP >= 8.2
+     */
+    public function testRestoringInvalidTokensKeepsRefreshTokenOutOfTraces(): void
+    {
+        $ignoreArgs = ini_get('zend.exception_ignore_args');
+        ini_set('zend.exception_ignore_args', '0');
+        try {
+            TokenSet::fromArray(['accessToken' => '', 'refreshToken' => 'refresh-SECRET']);
+            $this->fail('Expected InvalidArgumentException');
+        } catch (InvalidArgumentException $ex) {
+            $frames = array_filter($ex->getTrace(), static fn (array $frame): bool => ($frame['class'] ?? '') === TokenSet::class);
+            $this->assertNotEmpty($frames);
+            $this->assertStringNotContainsString('refresh-SECRET', print_r(array_column($frames, 'args'), true));
+        } finally {
+            ini_set('zend.exception_ignore_args', (string)$ignoreArgs);
+        }
+    }
+
     public function testInMemoryStoreKeepsLastSavedTokens(): void
     {
         $store = new InMemoryTokenStore();

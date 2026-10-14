@@ -21,8 +21,8 @@ final class TokenSet
     private ?string $owner;
 
     private function __construct(
-        string $accessToken,
-        string $refreshToken,
+        #[\SensitiveParameter] string $accessToken,
+        #[\SensitiveParameter] string $refreshToken,
         ?int $accessTokenExpiresAt,
         ?int $refreshTokenExpiresAt,
         ?string $owner
@@ -58,7 +58,7 @@ final class TokenSet
      * @return self restored tokens
      * @throws InvalidArgumentException when the array does not contain both tokens
      */
-    public static function fromArray(array $data): self
+    public static function fromArray(#[\SensitiveParameter] array $data): self
     {
         if (!is_string($data['accessToken'] ?? null) || !is_string($data['refreshToken'] ?? null)) {
             throw new InvalidArgumentException('Saved tokens must contain accessToken and refreshToken');

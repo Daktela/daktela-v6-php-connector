@@ -328,6 +328,9 @@ class ApiCommunicator
                 throw new NotFoundException($ex->getMessage(), null, $body, $ex->getApiErrors());
             }
             throw new RequestException($ex->getMessage(), $ex->getCode(), null, $status, $body, $ex->getApiErrors());
+        } catch (\Throwable $ex) {
+            // Anything else, e.g. from a logger, has frames with the payload as an argument
+            throw new RequestException($this->redact($ex->getMessage()));
         }
         $payload = [];
 

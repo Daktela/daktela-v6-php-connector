@@ -388,6 +388,24 @@ class ApiCommunicatorLoginTest extends TestCase
         }
     }
 
+    public function testUnexpectedErrorDuringLoginKeepsPasswordOutOfTraces(): void
+    {
+        // e.g. a logger that cannot open its log file
+        $logger = $this->createMock(\Psr\Log\LoggerInterface::class);
+        $logger->method('debug')->willThrowException(new \UnexpectedValueException('The log file cannot be opened'));
+        $communicator = $this->communicator([self::tokenResponse(self::tokens('A'))]);
+        $communicator->setLogger($logger);
+
+        try {
+            $communicator->login('api', 'pw-SECRET-123', null);
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame('The log file cannot be opened', $ex->getMessage());
+            $this->assertNull($ex->getPrevious());
+            $this->assertStringNotContainsString('pw-SECRET', self::exposed($ex));
+        }
+    }
+
     public function testDebugOutputHidesCredentialsAndTokens(): void
     {
         $tokens = self::tokens('A');

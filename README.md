@@ -311,7 +311,7 @@ final class FileTokenStore implements TokenStore
 $client = Client::login($instance, $username, $password, new FileTokenStore('/var/lib/myapp/daktela-tokens.json'));
 ```
 
-- The password is kept in memory to log in again. The connector never stores it, and keeps it and the tokens out of exception traces and out of `var_dump()` and `print_r()` output.
+- The password is kept in memory to log in again. The connector never stores it. It keeps the password and the tokens out of the traces of the exceptions it throws, and out of `var_dump()` and `print_r()` output.
 - Saved tokens record the user and instance they belong to. `login()` logs in again instead of using tokens of another user or instance, so one store can be shared safely. When the store fails, the connector logs a warning and continues with the tokens in memory.
 - Refresh tokens are long-lived credentials. Store them as securely as passwords, and use an `https://` instance URL with SSL verification enabled.
 - After the server rejects the credentials, the connector sends no further login, which could lock the account, until `login()` is called again.

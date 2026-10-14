@@ -61,6 +61,8 @@ class ApiCommunicator
     ];
     /** @var int Largest response body, in bytes, copied into an exception chained as the previous exception */
     private const COPIED_BODY_LIMIT = 1048576;
+    /** @var int Deepest nesting of arrays kept in the handler context of a copied exception */
+    private const CONTEXT_DEPTH_LIMIT = 3;
     /** @var string Request option shared by the hops of a redirected request; records that one left the instance */
     private const LEFT_INSTANCE_OPTION = 'daktela_left_instance';
     /** @var string Health check error used when the API answers without identifying the token's user */
@@ -393,12 +395,12 @@ class ApiCommunicator
                 $this->redact($ex->getMessage()),
                 $this->withoutCredentials($ex->getRequest()),
                 null,
-                $this->redactValues($ex->getHandlerContext())
+                $this->redactContext($ex->getHandlerContext())
             );
         }
         if ($ex instanceof GuzzleRequestException) {
             $request = $this->withoutCredentials($ex->getRequest());
-            $context = $this->redactValues($ex->getHandlerContext());
+            $context = $this->redactContext($ex->getHandlerContext());
             $response = $ex->getResponse();
             if ($response === null) {
                 return new GuzzleRequestException($this->redact($ex->getMessage()), $request, null, null, $context);
@@ -467,8 +469,31 @@ class ApiCommunicator
     }
 
     /**
-     * Redacts the access token from every string in a decoded structure, such as API errors, which may
-     * spell the token with JSON escapes the raw body redaction cannot match, or a handler context.
+     * Redacts the access token from the handler context of an HTTP client exception, e.g. the request headers
+     * cURL reports. Only strings and nested arrays are kept: objects, and arrays nested deeper than a few
+     * levels, may reference themselves and are left out.
+     * @param array $context handler context of the exception
+     * @param int $depth nesting level of $context
+     * @return array context with every string redacted
+     */
+    private function redactContext(array $context, int $depth = 0): array
+    {
+        foreach ($context as $key => $value) {
+            if (is_string($value)) {
+                $context[$key] = $this->redact($value);
+            } elseif (is_array($value) && $depth < self::CONTEXT_DEPTH_LIMIT) {
+                $context[$key] = $this->redactContext($value, $depth + 1);
+            } elseif (is_array($value) || is_object($value)) {
+                unset($context[$key]);
+            }
+        }
+
+        return $context;
+    }
+
+    /**
+     * Redacts the access token from every string in decoded API errors, which may spell the token with
+     * JSON escapes the raw body redaction cannot match.
      * @param array $values decoded values, possibly nested in lists, maps and objects
      * @return array values with every string redacted
      */
@@ -494,20 +519,21 @@ class ApiCommunicator
      */
     private function redact(string $text): string
     {
-        if ($this->accessToken === '') {
-            return $text;
+        $forms = [];
+        // Guzzle trims blanks from header values, so the server receives, and may echo, the trimmed token
+        foreach (array_unique([$this->accessToken, trim($this->accessToken, " \t")]) as $token) {
+            if ($token !== '') {
+                array_push(
+                    $forms,
+                    $token,
+                    urlencode($token),
+                    rawurlencode($token),
+                    substr((string)json_encode($token), 1, -1)
+                );
+            }
         }
 
-        return str_replace(
-            array_unique([
-                $this->accessToken,
-                urlencode($this->accessToken),
-                rawurlencode($this->accessToken),
-                substr((string)json_encode($this->accessToken), 1, -1),
-            ]),
-            '***',
-            $text
-        );
+        return $forms === [] ? $text : str_replace(array_unique($forms), '***', $text);
     }
 
     /**

@@ -1364,6 +1364,56 @@ class ApiCommunicatorTest extends TestCase
         }
     }
 
+    public function testSelfReferencingHandlerContextDoesNotBreakErrorHandling(): void
+    {
+        $object = new \stdClass();
+        $object->self = $object;
+        $array = ['level' => 'SECRET'];
+        $array['self'] = &$array;
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(new ConnectException(
+            'Connection reset',
+            new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET']),
+            null,
+            ['object' => $object, 'array' => $array, 'errno' => 56, 'error' => 'reset for SECRET']
+        ));
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $context = $ex->getPrevious()->getHandlerContext();
+            $this->assertArrayNotHasKey('object', $context);
+            $this->assertSame(56, $context['errno']);
+            $this->assertSame('reset for ***', $context['error']);
+            $this->assertSame('***', $context['array']['level']);
+        }
+    }
+
+    /**
+     * @dataProvider headerAuthenticationMethods
+     */
+    public function testTokenWithSurroundingBlanksIsRedactedWhenEchoed(int $method): void
+    {
+        // Guzzle trims header values, so the server receives and may echo the token without the blanks
+        $communicator = new ApiCommunicator('https://example.com', " SECRET\t");
+        $communicator->setAuthenticationMethod($method);
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(401, [], json_encode(['error' => ['Token SECRET is not valid']])),
+        ]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertStringNotContainsString('SECRET', $ex->getMessage());
+            $this->assertStringNotContainsString('SECRET', (string)$ex->getResponseBody());
+            $this->assertSame(['Token *** is not valid'], $ex->getApiErrors());
+        }
+    }
+
     public function testPreviousExceptionKeepsClassAndMessageOfRedirectErrors(): void
     {
         $request = new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET']);

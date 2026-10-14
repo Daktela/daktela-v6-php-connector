@@ -258,7 +258,7 @@ try {
 }
 ```
 
-The access token is replaced with `***` in exception messages, the stored response body and API errors, and log entries produced by the connector. With the header methods, `$ex->getPrevious()` is a copy of the Guzzle exception without the token: its request has no credential headers, and the token is replaced in its URL, message, response headers, and body. A response body larger than 1 MiB is left out of the copy. With query parameter authentication, nothing is chained. Prefer `getHttpStatus()`, `getResponseBody()`, and `getApiErrors()`. The response body may contain personal data, so log it with care.
+The access token is replaced with `***` in exception messages, the stored response body and API errors, and log entries produced by the connector. With the header methods, `$ex->getPrevious()` is a copy of the Guzzle exception without the token: its request has no credential headers, and the token is replaced in its URL, message, response headers, and body. For a transfer error, a response body larger than 1 MiB is left out of the copy. With query parameter authentication, nothing is chained. Prefer `getHttpStatus()`, `getResponseBody()`, and `getApiErrors()`. The response body may contain personal data, so log it with care.
 
 ## Access Tokens
 
@@ -319,7 +319,7 @@ $client->getApiCommunicator()->setAuthenticationMethod(
 );
 ```
 
-**Security Note:** Use one of the header methods in production. They keep the access token out of server logs, browser history, and other places where URLs are typically recorded. The default HTTP client does not send the token to a redirect target outside the instance (another host, another port, or plain HTTP from an HTTPS instance), and keeps it off for the rest of the redirect chain once a redirect has left the instance. If you set a custom HTTP client, configure its redirect handling yourself.
+**Security Note:** Use one of the header methods in production. They keep the access token out of server logs, browser history, and other places where URLs are typically recorded. The default HTTP client does not send the token to a redirect target outside the instance (another host, another port, or plain HTTP from an HTTPS instance; an upgrade from HTTP to HTTPS on the same host is allowed), and keeps it off for the rest of the redirect chain once a redirect has left the instance. If you set a custom HTTP client, configure its redirect handling yourself.
 
 ## Advanced Configuration
 

@@ -4,28 +4,53 @@ declare(strict_types=1);
 
 namespace Daktela\Tests\DaktelaV6\Http;
 
+use Daktela\DaktelaV6\Auth\InMemoryTokenStore;
+use Daktela\DaktelaV6\Auth\TokenSet;
 use Daktela\DaktelaV6\Client;
 use Daktela\DaktelaV6\Http\ApiCommunicator;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Runs the health check against a real Daktela instance, set by the INSTANCE and ACCESS_TOKEN environment
- * variables (and LOGIN_USERNAME and LOGIN_PASSWORD for the login test). Skipped when they are empty.
+ * Runs the health check against a real Daktela instance set by the INSTANCE environment variable. The
+ * static token tests need ACCESS_TOKEN, the login tests LOGIN_USERNAME and LOGIN_PASSWORD; tests whose
+ * variables are empty are skipped.
  */
 class HealthCheckTest extends TestCase
 {
     private string $instance;
-    private string $accessToken;
 
     protected function setUp(): void
     {
         parent::setUp();
 
         $this->instance = (string)getenv('INSTANCE');
-        $this->accessToken = (string)getenv('ACCESS_TOKEN');
-        if ($this->instance === '' || $this->accessToken === '') {
-            $this->markTestSkipped('Set INSTANCE and ACCESS_TOKEN to run the integration tests');
+        if ($this->instance === '') {
+            $this->markTestSkipped('Set INSTANCE to run the integration tests');
         }
+    }
+
+    private function accessToken(): string
+    {
+        $accessToken = (string)getenv('ACCESS_TOKEN');
+        if ($accessToken === '') {
+            $this->markTestSkipped('Set ACCESS_TOKEN to run the static token tests');
+        }
+
+        return $accessToken;
+    }
+
+    /**
+     * @return string[] username and password of an account without two-factor authentication
+     */
+    private function credentials(): array
+    {
+        $username = (string)getenv('LOGIN_USERNAME');
+        $password = (string)getenv('LOGIN_PASSWORD');
+        if ($username === '' || $password === '') {
+            $this->markTestSkipped('Set LOGIN_USERNAME and LOGIN_PASSWORD to run the login tests');
+        }
+
+        return [$username, $password];
     }
 
     private function communicator(string $accessToken, int $authenticationMethod): ApiCommunicator
@@ -39,7 +64,7 @@ class HealthCheckTest extends TestCase
 
     public function testHealthCheckAcceptsStaticToken(): void
     {
-        $health = $this->communicator($this->accessToken, ApiCommunicator::AUTHENTICATION_METHOD_HEADER)->healthCheck();
+        $health = $this->communicator($this->accessToken(), ApiCommunicator::AUTHENTICATION_METHOD_HEADER)->healthCheck();
 
         $this->assertTrue($health['healthy'], $health['error'] ?? '');
         $this->assertSame(200, $health['status_code']);
@@ -50,13 +75,14 @@ class HealthCheckTest extends TestCase
      */
     public function testHealthCheckAcceptsStaticTokenInBearerHeader(): void
     {
-        $health = $this->communicator($this->accessToken, ApiCommunicator::AUTHENTICATION_METHOD_BEARER)->healthCheck();
+        $health = $this->communicator($this->accessToken(), ApiCommunicator::AUTHENTICATION_METHOD_BEARER)->healthCheck();
 
         $this->assertTrue($health['healthy'], $health['error'] ?? '');
     }
 
     public function testHealthCheckReportsRejectedToken(): void
     {
+        $this->accessToken();
         $health = $this->communicator(md5(uniqid('', true)), ApiCommunicator::AUTHENTICATION_METHOD_HEADER)->healthCheck();
 
         $this->assertFalse($health['healthy']);
@@ -66,12 +92,24 @@ class HealthCheckTest extends TestCase
 
     public function testLoginWithUsernameAndPassword(): void
     {
-        $username = (string)getenv('LOGIN_USERNAME');
-        $password = (string)getenv('LOGIN_PASSWORD');
-        if ($username === '' || $password === '') {
-            $this->markTestSkipped('Set LOGIN_USERNAME and LOGIN_PASSWORD to run the login test');
-        }
+        [$username, $password] = $this->credentials();
 
         $this->assertTrue(Client::login($this->instance, $username, $password)->ping());
+    }
+
+    public function testLoginSessionRefreshesAccessTokenWithRealServer(): void
+    {
+        [$username, $password] = $this->credentials();
+        $store = new InMemoryTokenStore();
+        Client::login($this->instance, $username, $password, $store);
+        $issued = $store->load();
+        $this->assertNotNull($issued);
+        // An access token the server does not accept, next to the real refresh token
+        $store->save(TokenSet::fromTokens('rejected-access-token', $issued->getRefreshToken(), $issued->getOwner()));
+
+        $health = Client::login($this->instance, $username, $password, $store)->healthCheck();
+
+        $this->assertTrue($health['healthy'], $health['error'] ?? '');
+        $this->assertNotSame('rejected-access-token', $store->load()->getAccessToken());
     }
 }

@@ -4,15 +4,17 @@ All notable changes to this project are documented in this file. The project fol
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-10-14
+
 ### Security
 
 - Stopped chaining the Guzzle exception as the previous exception with header authentication (`X-AUTH-TOKEN` or `Authorization: Bearer`) when its message contains the access token, for example because the response echoes it. Query parameter authentication already did not chain it.
 
 ### Fixed
 
-- Made `ping()` and `healthCheck()` report an invalid, expired, or revoked access token as unhealthy. The `whoim` endpoint answers such requests with HTTP 200 and no user, which the health check previously reported as healthy; it now requires the response to identify a user.
-- `RateLimitException::getHttpStatus()` now returns 429 instead of `null`, so `healthCheck()` reports `status_code` 429 for a rate-limited check.
-- A response that is not valid JSON now throws a `RequestException` that carries the HTTP status and the response body (with the access token redacted), instead of neither.
+- Made `ping()` and `healthCheck()` report an invalid, expired, or revoked access token as unhealthy. The `whoim` endpoint answers such requests with HTTP 200 and no user, which the health check previously reported as healthy. It now requires the response to identify a user, so a successful response that is not a `whoim` result, for example from a wrong instance URL, is also reported as unhealthy.
+- Made `RateLimitException::getHttpStatus()` return 429 instead of `null`, so `healthCheck()` reports `status_code` 429 for a rate-limited check.
+- Made a response that is not valid JSON throw a `RequestException` that carries the HTTP status and the response body with the access token redacted. Previously, neither was available.
 
 ### Added
 
@@ -20,7 +22,9 @@ All notable changes to this project are documented in this file. The project fol
 
 ### Changed
 
-- `healthCheck()` now reports the first error message returned by the API (for example `New password should be set`) as `error`, and includes `status_code` for HTTP error responses. Previously, `error` contained the HTTP client's message with a truncated response body, and `status_code` was missing.
+- Made `healthCheck()` report the first error message returned by the API (for example `New password should be set`) as `error`, and include `status_code` for HTTP error responses. Previously, `error` contained the HTTP client's message with a truncated response body, and `status_code` was missing.
+
+No public method signatures were changed in this release. Review the entries above if your code parses the `error` key of `healthCheck()`, relies on `RequestException::getPrevious()` with header authentication, or expects `RateLimitException::getHttpStatus()` to be `null`.
 
 ## [2.6.0] - 2026-10-06
 
@@ -96,6 +100,7 @@ Public methods only gained optional parameters, and `ARequest::getResponse()` wi
 
 No public method signatures were changed in this release. The dependency minimums in the Security section are the only compatibility-sensitive upgrade requirement.
 
-[Unreleased]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.6.0...HEAD
+[Unreleased]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.7.0...HEAD
+[2.7.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.6.0...2.7.0
 [2.6.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.5.0...2.6.0
 [2.5.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.4.2...2.5.0

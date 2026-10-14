@@ -239,7 +239,7 @@ $httpStatus =   $response->getHttpStatus();
 
 ## Handling exceptions
 
-Transport failures and, with Guzzle's default `http_errors` setting, non-retryable HTTP 4xx/5xx responses are wrapped in `Daktela\DaktelaV6\Exception\RequestException`. HTTP 429 responses use the more specific `RateLimitException`, which extends `RequestException`.
+Transport failures and, with Guzzle's default `http_errors` setting, non-retryable HTTP 4xx/5xx responses are wrapped in `Daktela\DaktelaV6\Exception\RequestException`. HTTP 429 responses use the more specific `RateLimitException`, which extends `RequestException` and returns 429 from `getHttpStatus()`.
 
 HTTP 404 responses throw `NotFoundException`, which also extends `RequestException`. For HTTP errors, the exception exposes the response details:
 

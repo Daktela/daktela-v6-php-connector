@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file. The project fol
 
 ## [Unreleased]
 
+## [2.7.1] - 2026-10-14
+
 ### Security
 
 - Chained a copy of the Guzzle exception without the access token as the previous exception with header authentication. Its request has no credential headers, and the token is replaced in its URL, message, response headers, body, and handler context. Objects in the handler context are left out. For a transfer error, a response body that is unreadable, of unknown size, or larger than 1 MiB is also left out. Previously, the chained exception held the `X-AUTH-TOKEN` or `Authorization` header and the raw response body, and 2.7.0 dropped it entirely when its message contained the token.
@@ -111,7 +113,8 @@ Public methods only gained optional parameters, and `ARequest::getResponse()` wi
 
 No public method signatures were changed in this release. The dependency minimums in the Security section are the only compatibility-sensitive upgrade requirement.
 
-[Unreleased]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.7.0...HEAD
+[Unreleased]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.7.1...HEAD
+[2.7.1]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.7.0...2.7.1
 [2.7.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.6.0...2.7.0
 [2.6.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.5.0...2.6.0
 [2.5.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.4.2...2.5.0

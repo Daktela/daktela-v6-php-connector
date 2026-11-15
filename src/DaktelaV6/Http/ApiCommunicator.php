@@ -520,9 +520,11 @@ class ApiCommunicator
                 // was reset. Guzzle 7 reports these as ConnectException; Guzzle 8 as NetworkException, or as
                 // ResponseTransferException once the headers were received.
                 $lastException = $ex;
+                // The message of the wrapped exception, as a broken-off response may be summarized in the message
+                $exception = $this->wrapException($ex);
                 $this->logger?->warning('Connection error', [
                     'endpoint' => $apiEndpoint,
-                    'error' => $this->redact($ex->getMessage()),
+                    'error' => $exception->getMessage(),
                 ]);
 
                 // A timeout may happen after the server received the request, so only
@@ -531,7 +533,7 @@ class ApiCommunicator
                     || !$this->retryConfig->shouldRetryOnConnectionError()
                     || (!$canRetryAfterSend && !GuzzleCompat::failedBeforeSend($ex))
                 ) {
-                    throw $this->wrapException($ex);
+                    throw $exception;
                 }
 
                 if ($attempt >= $maxAttempts - 1) {
@@ -726,16 +728,7 @@ class ApiCommunicator
      */
     private function sanitize(Throwable $ex, ?string $redactedBody = null): ?Throwable
     {
-        if ($ex instanceof TransferException && $ex instanceof NetworkExceptionInterface) {
-            // A connection or network failure without a response
-            return GuzzleCompat::copy(
-                $ex,
-                $this->redact($ex->getMessage()),
-                $this->withoutCredentials($ex->getRequest()),
-                null,
-                $this->redactContext(GuzzleCompat::handlerContext($ex))
-            );
-        }
+        // A request exception first: one that also reports itself as a network failure may carry a response
         if ($ex instanceof GuzzleRequestException) {
             $request = $this->withoutCredentials($ex->getRequest());
             $context = $this->redactContext(GuzzleCompat::handlerContext($ex));
@@ -749,6 +742,16 @@ class ApiCommunicator
                 : $this->redact($this->withRedactedBodySummary($ex->getMessage(), $original, $response));
 
             return GuzzleCompat::copy($ex, $message, $request, $response, $context);
+        }
+        if ($ex instanceof TransferException && $ex instanceof NetworkExceptionInterface) {
+            // A connection or network failure without a response
+            return GuzzleCompat::copy(
+                $ex,
+                $this->redact($ex->getMessage()),
+                $this->withoutCredentials($ex->getRequest()),
+                null,
+                $this->redactContext(GuzzleCompat::handlerContext($ex))
+            );
         }
 
         // Other exceptions cannot be copied, and their own previous exceptions may carry the token
@@ -773,13 +776,15 @@ class ApiCommunicator
         if ($summary === null || $summary === '') {
             return $message;
         }
-        // Guzzle 8 escapes control characters of the summary in its messages
-        $inMessage = GuzzleCompat::summaryInMessage($summary);
-        if (strpos($message, $inMessage) === false) {
-            return $message;
-        }
+        $redactedSummary = Message::bodySummary($copy) ?? '';
+        // Guzzle 8 escapes control characters of the summary in its messages; a custom client may not
+        $message = str_replace(
+            GuzzleCompat::escapeForMessage($summary),
+            GuzzleCompat::escapeForMessage($redactedSummary),
+            $message
+        );
 
-        return str_replace($inMessage, GuzzleCompat::summaryInMessage(Message::bodySummary($copy) ?? ''), $message);
+        return str_replace($summary, $redactedSummary, $message);
     }
 
     /**

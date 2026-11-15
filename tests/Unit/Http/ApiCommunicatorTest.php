@@ -1788,6 +1788,89 @@ class ApiCommunicatorTest extends TestCase
         }
     }
 
+    public function testExceptionWithResponseThatIsAlsoANetworkFailureKeepsRedactedResponse(): void
+    {
+        // The response is not dropped although the exception also implements NetworkExceptionInterface
+        $token = str_repeat('a1b2c3d4e5', 4);
+        $request = new Request('GET', '/', ['X-AUTH-TOKEN' => $token]);
+        $response = new GuzzleResponse(200, [], json_encode(['error' => [str_repeat('x', 90) . ' ' . $token]]));
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(new \Daktela\Tests\Support\NetworkBadResponseException(
+            GuzzleRequestException::create($request, $response)->getMessage(),
+            $request,
+            $response
+        ));
+        $communicator = new ApiCommunicator('https://example.com', $token);
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertStringNotContainsString(substr($token, 0, 10), $ex->getMessage());
+            $previous = $ex->getPrevious();
+            $this->assertInstanceOf(\Daktela\Tests\Support\NetworkBadResponseException::class, $previous);
+            $this->assertStringContainsString(' ***', (string)$previous->getResponse()->getBody());
+        }
+    }
+
+    public function testBodySummaryInMessageOfCustomClientIsReplacedWhetherEscapedOrNot(): void
+    {
+        // A custom client may put the summary in its message unescaped, also on Guzzle 8
+        $token = str_repeat('a1b2c3d4e5', 4);
+        $request = new Request('GET', '/');
+        $response = new GuzzleResponse(200, [], "line\n" . str_repeat('x', 90) . ' ' . $token);
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(new BadResponseException(
+            "Unexpected response:\n" . \GuzzleHttp\Psr7\Message::bodySummary($response),
+            $request,
+            $response
+        ));
+        $communicator = new ApiCommunicator('https://example.com', $token);
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertStringContainsString(' ***', $ex->getMessage());
+            $this->assertStringNotContainsString(substr($token, 0, 10), $ex->getMessage());
+        }
+    }
+
+    public function testConnectionErrorLogDoesNotKeepPartOfTokenFromBodySummary(): void
+    {
+        $logged = [];
+        $logger = $this->createMock(LoggerInterface::class);
+        foreach (['debug', 'info', 'warning', 'error'] as $level) {
+            $logger->method($level)->willReturnCallback(function (string $message, array $context = []) use (&$logged): void {
+                $logged[] = $message . json_encode($context);
+            });
+        }
+        $token = str_repeat('a1b2c3d4e5', 4);
+        $response = new GuzzleResponse(200, [], str_repeat('x', 90) . ' ' . $token);
+        $communicator = new ApiCommunicator('https://example.com', $token);
+        $communicator->setLogger($logger);
+        $communicator->setHttpClient($this->createMockClient([
+            fn (RequestInterface $request) => GuzzleExceptions::brokenResponse(
+                $request,
+                $response,
+                'Response broke off: ' . \GuzzleHttp\Psr7\Message::bodySummary($response)
+            ),
+        ]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertStringNotContainsString(substr($token, 0, 10), $ex->getMessage());
+        }
+        $this->assertNotEmpty($logged);
+        foreach ($logged as $line) {
+            $this->assertStringNotContainsString(substr($token, 0, 10), $line);
+        }
+    }
+
     public function testMethodIsSentInUpperCase(): void
     {
         // Guzzle 8 sends the method as given

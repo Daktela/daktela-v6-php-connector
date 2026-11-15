@@ -5,7 +5,7 @@ parameters:
     ignoreErrors:
         # Guzzle 8 exception classes, which do not exist when the analysis runs against Guzzle 7 (see GuzzleCompat)
         -
-            message: '#GuzzleHttp\\Exception\\(ResponseException|ResponseTransferException|NetworkException|NetworkTimeoutException|ConnectTimeoutException)\b#'
+            message: '#GuzzleHttp\\Exception\\(ResponseException|ResponseTransferException|ResponseTimeoutException|NetworkException|NetworkTimeoutException|ConnectTimeoutException)\b#'
             identifier: class.notFound
             paths:
                 - src/DaktelaV6/Http/ApiCommunicator.php

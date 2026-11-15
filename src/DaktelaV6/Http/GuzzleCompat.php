@@ -12,6 +12,8 @@ use GuzzleHttp\Exception\NetworkException;
 use GuzzleHttp\Exception\NetworkTimeoutException;
 use GuzzleHttp\Exception\RequestException;
 use GuzzleHttp\Exception\ResponseException;
+use GuzzleHttp\Exception\ResponseTimeoutException;
+use GuzzleHttp\Exception\ResponseTransferException;
 use GuzzleHttp\Exception\ServerException;
 use GuzzleHttp\Exception\TooManyRedirectsException;
 use GuzzleHttp\Exception\TransferException;
@@ -44,6 +46,16 @@ final class GuzzleCompat
         ConnectException::class,
         NetworkTimeoutException::class,
         NetworkException::class,
+    ];
+    /** @var string[] Guzzle 8 classes a copied exception with a response can have, most specific first */
+    private const GUZZLE8_RESPONSE_EXCEPTIONS = [
+        ClientException::class,
+        ServerException::class,
+        BadResponseException::class,
+        TooManyRedirectsException::class,
+        ResponseTimeoutException::class,
+        ResponseTransferException::class,
+        ResponseException::class,
     ];
 
     /**
@@ -139,8 +151,11 @@ final class GuzzleCompat
             return self::create(self::withAncestors($ex, self::GUZZLE8_NETWORK_EXCEPTIONS), [$message, $request]);
         }
         if ($ex instanceof ResponseException && $response !== null) {
-            // The constructor of ResponseException is final, so every subclass takes these arguments
-            return self::create([get_class($ex)], [$message, $request, $response]);
+            // The constructor of ResponseException is final, so every subclass takes these arguments; the
+            // ancestors are a fallback all the same
+            $classes = self::withAncestors($ex, self::GUZZLE8_RESPONSE_EXCEPTIONS);
+
+            return self::create($classes, [$message, $request, $response]);
         }
         if ($ex instanceof RequestException) {
             // A request failure without a response, e.g. while reading the request body
@@ -153,14 +168,14 @@ final class GuzzleCompat
     }
 
     /**
-     * Returns a response body summary in the form a Guzzle exception message contains it: Guzzle 8 escapes
-     * control characters, such as line breaks, in messages.
-     * @param string $summary body summary created by Message::bodySummary()
-     * @return string summary as it appears in the message
+     * Escapes control characters, such as line breaks, as Guzzle 8 does with the values it puts in exception
+     * messages. Without PSR-7 3, which provides the escaping, the text is returned unchanged.
+     * @param string $text text, e.g. a response body summary
+     * @return string text as Guzzle 8 puts it in a message
      */
-    public static function summaryInMessage(string $summary): string
+    public static function escapeForMessage(string $text): string
     {
-        return class_exists(DiagnosticValue::class) ? DiagnosticValue::escape($summary) : $summary;
+        return class_exists(DiagnosticValue::class) ? DiagnosticValue::escape($text) : $text;
     }
 
     /**

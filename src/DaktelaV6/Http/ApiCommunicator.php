@@ -22,6 +22,7 @@ use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\Message;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Uri;
+use GuzzleHttp\Psr7\UriResolver;
 use GuzzleHttp\Psr7\Utils as Psr7Utils;
 use Psr\Http\Client\NetworkExceptionInterface;
 use Psr\Http\Message\RequestInterface;
@@ -482,7 +483,8 @@ class ApiCommunicator
         $maxAttempts = 1 + max($retryCount, $rateLimitRetryCount);
         $lastException = null;
         $applyRetryDelay = false;
-        $canRetryAfterSend = in_array(strtoupper($method), self::IDEMPOTENT_METHODS, true)
+        // buildRequest() upper-cases the method
+        $canRetryAfterSend = in_array($request->getMethod(), self::IDEMPOTENT_METHODS, true)
             || ($this->retryConfig?->shouldRetryNonIdempotentRequests() ?? false);
 
         for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
@@ -531,7 +533,7 @@ class ApiCommunicator
                 // idempotent requests (or explicitly allowed ones) are repeated then.
                 if ($this->retryConfig === null
                     || !$this->retryConfig->shouldRetryOnConnectionError()
-                    || (!$canRetryAfterSend && !self::failedBeforeSend($ex, $request))
+                    || (!$canRetryAfterSend && !$this->failedBeforeSend($ex, $request))
                 ) {
                     throw $exception;
                 }
@@ -608,20 +610,25 @@ class ApiCommunicator
      * @param RequestInterface $request request the connector sent
      * @return bool true when the request was not sent
      */
-    private static function failedBeforeSend(Throwable $ex, RequestInterface $request): bool
+    private function failedBeforeSend(Throwable $ex, RequestInterface $request): bool
     {
         if (!$ex instanceof NetworkExceptionInterface || !GuzzleCompat::failedToConnect($ex)) {
             return false;
         }
-        // A redirect hop has another method or URI. The HTTP client resolves the URI against its base URI, so only
-        // the path and the query are compared. A redirect that keeps the method and leads to the same path and
-        // query on another origin (307 or 308, or 301 and 302 with strict redirects) passes: the connector assumes
-        // that a server redirecting a request to the same resource elsewhere did not process it.
-        $failed = $ex->getRequest();
+        // A redirect hop has another method, URI, or origin. The HTTP client resolves the URI of the request
+        // against its base URI, which removes dot segments from the path; a URI without a host was not resolved
+        // (e.g. by a mock handler), so its origin is not compared.
+        $failed = $ex->getRequest()->getUri();
+        $sent = $request->getUri();
+        if ($failed->getHost() !== ''
+            && self::leavesInstance(new Uri((string)self::normalizeUrl($this->baseUrl)), $failed)
+        ) {
+            return false;
+        }
 
-        return $failed->getMethod() === $request->getMethod()
-            && $failed->getUri()->getPath() === $request->getUri()->getPath()
-            && $failed->getUri()->getQuery() === $request->getUri()->getQuery();
+        return $ex->getRequest()->getMethod() === $request->getMethod()
+            && UriResolver::removeDotSegments($failed->getPath()) === UriResolver::removeDotSegments($sent->getPath())
+            && $failed->getQuery() === $sent->getQuery();
     }
 
     /**

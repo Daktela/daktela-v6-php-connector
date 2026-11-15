@@ -424,6 +424,7 @@ You can inject a custom Guzzle HTTP client for advanced configurations (proxies,
 use GuzzleHttp\Client as GuzzleClient;
 
 $httpClient = new GuzzleClient([
+    'base_uri' => 'https://your-instance.daktela.com',
     'proxy' => 'http://proxy.example.com:8080',
     'timeout' => 60,
 ]);
@@ -431,7 +432,7 @@ $httpClient = new GuzzleClient([
 $client->getApiCommunicator()->setHttpClient($httpClient);
 ```
 
-When a custom client is set, configure timeouts, TLS verification, `http_errors`, and other transport options on that client. The connector's `setRequestTimeout()` and `setVerifySsl()` settings are used only when it creates the default Guzzle client.
+The connector sends requests with a path relative to the instance, so a custom client needs `base_uri` set to the instance URL. When a custom client is set, configure timeouts, TLS verification, `http_errors`, and other transport options on that client. The connector's `setRequestTimeout()` and `setVerifySsl()` settings are used only when it creates the default Guzzle client.
 
 ## Retry Mechanism
 
@@ -439,7 +440,7 @@ The connector supports automatic retries with exponential backoff for configured
 
 Connection errors are transfers that end without a complete response. Guzzle 7 reports connection failures and timeouts as `ConnectException`. Guzzle 8 reports connection failures, timeouts, and connection resets as `NetworkException`, and a response that broke off after its headers, for example on a timeout, as `ResponseTransferException`.
 
-Create requests (`POST`) are not idempotent: a timeout or a 5xx response does not prove that the server did not create the record, so repeating them could create duplicates. They are therefore retried only on HTTP 429 and when the connection for the request itself could not be established (DNS, connect, or TLS handshake failure). A connection failure on a redirect target does not count: the server may have created the record before it redirected, for example with 303 See Other. With Guzzle 8, a connect timeout also counts as a failure to establish the connection; with Guzzle 7, a timeout is never retried for them, because Guzzle 7 does not report in which phase it happened. The connector tells the request from a redirect hop by its method, path, and query, so a custom HTTP client must keep them for a failed `POST` to be retried. Set `retryNonIdempotentRequests: true` to retry them in all retryable cases. Read, update, and delete requests are retried in all retryable cases.
+Create requests (`POST`) are not idempotent: a timeout or a 5xx response does not prove that the server did not create the record, so repeating them could create duplicates. They are therefore retried only on HTTP 429 and when the connection for the request itself could not be established (DNS, connect, or TLS handshake failure). A connection failure on a redirect target does not count: the server may have created the record before it redirected, for example with 303 See Other. With Guzzle 8, a connect timeout also counts as a failure to establish the connection; with Guzzle 7, a timeout is never retried for them, because Guzzle 7 does not report in which phase it happened. The connector tells the request from a redirect hop by its origin, method, path, and query, so a custom HTTP client must send the request to the instance and keep its method, path, and query for a failed `POST` to be retried. Set `retryNonIdempotentRequests: true` to retry them in all retryable cases. Read, update, and delete requests are retried in all retryable cases.
 
 ```php
 use Daktela\DaktelaV6\Http\RetryConfig;

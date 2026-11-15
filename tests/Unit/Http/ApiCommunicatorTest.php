@@ -926,16 +926,20 @@ class ApiCommunicatorTest extends TestCase
     /**
      * @dataProvider redirectHopProvider
      */
-    public function testPostIsRepeatedOnlyWhenTheHopThatFailedIsTheSentRequest(int $status, string $location, bool $repeated): void
-    {
+    public function testPostIsRepeatedOnlyWhenTheHopThatFailedIsTheSentRequest(
+        string $instance,
+        int $status,
+        string $location,
+        bool $repeated
+    ): void {
         $history = [];
-        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator = new ApiCommunicator($instance, 'token');
         // With a base URI, a relative Location resolves to an absolute URL that the client follows
         $communicator->setHttpClient($this->createMockClient([
             new GuzzleResponse($status, ['Location' => $location]),
             fn (RequestInterface $hop) => GuzzleExceptions::connectFailure($hop),
             $this->okResponse(),
-        ], $history, 'https://example.com'));
+        ], $history, $instance));
         $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
 
         try {
@@ -945,7 +949,7 @@ class ApiCommunicatorTest extends TestCase
             $this->assertFalse($repeated, 'The POST should have been sent again');
         }
         $this->assertCount($repeated ? 3 : 2, $history);
-        $expectedHop = str_starts_with($location, 'https://') ? $location : 'https://example.com' . $location;
+        $expectedHop = str_starts_with($location, '/') ? $instance . $location : $location;
         $this->assertSame($expectedHop, (string)$history[1]['request']->getUri());
     }
 
@@ -953,11 +957,49 @@ class ApiCommunicatorTest extends TestCase
     {
         return [
             // 303 See Other to the same URL: the hop differs from the POST only in its method
-            'same URL, GET' => [303, '/api/v6/users.json', false],
-            'same path, other query' => [307, '/api/v6/users.json?page=2', false],
-            // Accepted: a server redirecting the request to the same resource elsewhere is assumed not to have processed it
-            'same path and query on another origin' => [307, 'https://other.example.org/api/v6/users.json', true],
+            'same URL, GET' => ['https://example.com', 303, '/api/v6/users.json', false],
+            'same path, other query' => ['https://example.com', 307, '/api/v6/users.json?page=2', false],
+            'other path on the instance' => ['https://example.com', 307, '/api/v6/users/created.json', false],
+            'same path and query on another host' => ['https://example.com', 307, 'https://other.example.org/api/v6/users.json', false],
+            'same path and query on another port' => ['https://example.com', 308, 'https://example.com:8443/api/v6/users.json', false],
+            // Accepted: an instance redirecting a request to its own HTTPS URL did not process it
+            'same path and query, upgraded to HTTPS on the instance' => ['http://example.com', 308, 'https://example.com/api/v6/users.json', true],
         ];
+    }
+
+    public function testPostIsRetriedWhenItsOwnConnectionFailsWithDotSegmentsInEndpoint(): void
+    {
+        // The client removes dot segments when it resolves the URI against its base URI
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([
+            fn (RequestInterface $request) => GuzzleExceptions::connectFailure($request),
+            $this->okResponse(),
+        ], $history, 'https://example.com'));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        $this->assertTrue($communicator->sendRequest('POST', 'tickets/./comments', [], ['text' => 'x'])->isSuccess());
+        $this->assertCount(2, $history);
+        $this->assertSame('/api/v6/tickets/comments.json', $history[0]['request']->getUri()->getPath());
+    }
+
+    public function testPostIsNotRetriedWhenCustomClientSendsItElsewhere(): void
+    {
+        // The connector cannot tell a request sent to another host, e.g. through a gateway, from a redirect hop
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([
+            fn (RequestInterface $request) => GuzzleExceptions::connectFailure($request),
+            $this->okResponse(),
+        ], $history, 'https://gateway.example.org'));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        try {
+            $communicator->sendRequest('POST', 'Users', [], ['name' => 'x']);
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertCount(1, $history);
+        }
     }
 
     public function testGetIsRetriedWhenRedirectTargetCannotBeReached(): void

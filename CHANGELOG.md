@@ -7,22 +7,26 @@ All notable changes to this project are documented in this file. The project fol
 ### Added
 
 - Supported Guzzle 8 with PSR-7 3 alongside Guzzle 7 with PSR-7 2: the constraints are `guzzlehttp/guzzle: ^7.15.2 || ^8.0.1` and `guzzlehttp/psr7: ^2.13 || ^3.0`, and Composer installs the version that fits the other dependencies of the project. With Guzzle 8:
-  - Network failures without a response (`NetworkException`, such as a timeout or a connection reset before the response headers) and responses that broke off after their headers (`ResponseTransferException`, such as `ResponseTimeoutException`) are retried as connection errors: idempotent requests always, other requests only with `retryNonIdempotentRequests`. Guzzle 8 throws `ConnectException` only when the connection could not be established, so a `ConnectException`, including a connect timeout, is retried for `POST` requests as well.
+  - Network failures without a response (`NetworkException`, such as a timeout or a connection reset before the response headers) and responses that broke off after their headers (`ResponseTransferException`, such as `ResponseTimeoutException`) are retried as connection errors: idempotent requests always, other requests only with `retryNonIdempotentRequests`. Guzzle 8 throws `ConnectException` only when the connection could not be established, so a `ConnectException`, including a connect timeout, is retried for `POST` requests as well, unless it happened on a redirect hop (see Fixed).
   - The previous exception of a `RequestException` is a copy of the Guzzle 8 exception of the same class without the access token, as with Guzzle 7. Guzzle 8 exceptions have no handler context, and Guzzle 8.1 and later leave the query out of the URL in their messages.
   - The redacted body summary also replaces the raw one in messages where Guzzle 8 escapes line breaks and other control characters, so a token cut at the 120-byte limit leaves no fragment.
 
 ### Changed
 
 - Sent the HTTP method in upper case. Guzzle 7 already did; Guzzle 8 sends the method as given, so `sendRequest('post', ...)` would have sent `post`. This also avoids the deprecation notice PSR-7 2.11 and later trigger for a method that is not in upper case.
-- Retried a network exception of a custom HTTP client (`Psr\Http\Client\NetworkExceptionInterface`) as a connection error, under the same rules as Guzzle's. Previously it was wrapped in a `RequestException` without a retry.
+- Retried a network exception of a custom HTTP client (`Psr\Http\Client\NetworkExceptionInterface`) as a connection error: idempotent requests always, other requests only with `retryNonIdempotentRequests`, because only a Guzzle `ConnectException` shows that the request was not sent. Previously it was wrapped in a `RequestException` without a retry. A Guzzle transfer exception of such a client is chained as a copy without the access token, as Guzzle's own exceptions are.
 - Encoded payloads and parsed responses with PHP's JSON functions instead of Guzzle's JSON helpers, which Guzzle 7.15 deprecated with a notice and Guzzle 8 removed. The messages of the resulting exceptions are unchanged.
 - Declared `psr/http-client` and `ext-json` as dependencies. Guzzle already required them. Raised the `guzzlehttp/psr7` 2.x minimum to 2.13, which Guzzle 7.15.2 already required.
+
+### Fixed
+
+- Stopped repeating a create request (`POST`) when the connection failed on a redirect hop, for example when the server answered the request with 303 See Other after creating a record and the redirect target could not be reached. Only a connection failure of the request the connector sent counts as proof that the request was not sent. Previously, when the redirect target could not be resolved or connected to, or its TLS handshake failed, the request was sent again and could create a duplicate record. The connector tells the request from a redirect hop by its origin, method, path, and query: a redirect hop with the same method, path, and query on the instance itself, such as an upgrade to HTTPS, still counts as the request. A custom HTTP client therefore has to send the request to the instance and keep its method, path, and query; one that sends it elsewhere, e.g. through a gateway, or rewrites it, e.g. by signing the query, no longer gets a `POST` retried after its connection failed.
 
 ### Security
 
 - Stopped chaining an exception as the previous exception of the `RequestException` for a response that cannot be parsed as JSON. Its stack trace held the raw response body, which may contain the access token, as a function argument.
 
-No public method signatures were changed in this release. With Guzzle 7, the connector behaves as in 2.8.0 except for the Security and Changed sections. Review the Added section if your code inspects `getPrevious()` of a `RequestException`, or relies on which network failures are retried, before your project upgrades to Guzzle 8.
+No public method signatures were changed in this release. With Guzzle 7, the connector behaves as in 2.8.0 except for the Changed, Fixed, and Security sections. Review the Added section if your code inspects `getPrevious()` of a `RequestException`, or relies on which network failures are retried, before your project upgrades to Guzzle 8.
 
 ## [2.8.0] - 2026-10-14
 

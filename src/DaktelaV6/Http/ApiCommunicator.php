@@ -22,6 +22,7 @@ use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\Message;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Uri;
+use GuzzleHttp\Psr7\UriResolver;
 use GuzzleHttp\Psr7\Utils as Psr7Utils;
 use Psr\Http\Client\NetworkExceptionInterface;
 use Psr\Http\Message\RequestInterface;
@@ -482,7 +483,8 @@ class ApiCommunicator
         $maxAttempts = 1 + max($retryCount, $rateLimitRetryCount);
         $lastException = null;
         $applyRetryDelay = false;
-        $canRetryAfterSend = in_array(strtoupper($method), self::IDEMPOTENT_METHODS, true)
+        // buildRequest() upper-cases the method
+        $canRetryAfterSend = in_array($request->getMethod(), self::IDEMPOTENT_METHODS, true)
             || ($this->retryConfig?->shouldRetryNonIdempotentRequests() ?? false);
 
         for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
@@ -531,7 +533,7 @@ class ApiCommunicator
                 // idempotent requests (or explicitly allowed ones) are repeated then.
                 if ($this->retryConfig === null
                     || !$this->retryConfig->shouldRetryOnConnectionError()
-                    || (!$canRetryAfterSend && !GuzzleCompat::failedBeforeSend($ex))
+                    || (!$canRetryAfterSend && !$this->failedBeforeSend($ex, $request))
                 ) {
                     throw $exception;
                 }
@@ -598,6 +600,35 @@ class ApiCommunicator
             throw $this->wrapException($lastException, 'Max retries exceeded: ');
         }
         throw new RequestException('Max retries exceeded: Unknown error');
+    }
+
+    /**
+     * Checks whether a network failure happened before the request was sent to the server, so that repeating it
+     * cannot duplicate a server-side operation. A redirect hop that could not connect does not count: the server
+     * received the request it redirected, e.g. a POST it answered with 303 See Other after creating a record.
+     * @param Throwable $ex network exception raised by the HTTP client
+     * @param RequestInterface $request request the connector sent
+     * @return bool true when the request was not sent
+     */
+    private function failedBeforeSend(Throwable $ex, RequestInterface $request): bool
+    {
+        if (!$ex instanceof NetworkExceptionInterface || !GuzzleCompat::failedToConnect($ex)) {
+            return false;
+        }
+        // A redirect hop has another method, URI, or origin. The HTTP client resolves the URI of the request
+        // against its base URI, which removes dot segments from the path; a URI without a host was not resolved
+        // (e.g. by a mock handler), so its origin is not compared.
+        $failed = $ex->getRequest()->getUri();
+        $sent = $request->getUri();
+        if ($failed->getHost() !== ''
+            && self::leavesInstance(new Uri((string)self::normalizeUrl($this->baseUrl)), $failed)
+        ) {
+            return false;
+        }
+
+        return $ex->getRequest()->getMethod() === $request->getMethod()
+            && UriResolver::removeDotSegments($failed->getPath()) === UriResolver::removeDotSegments($sent->getPath())
+            && $failed->getQuery() === $sent->getQuery();
     }
 
     /**
@@ -1230,6 +1261,10 @@ class ApiCommunicator
      *
      * Note: When a custom client is set, the timeout and SSL verification
      * settings from this class are ignored - configure them on your client instead.
+     *
+     * The client needs `base_uri` set to the instance URL, because the connector sends paths relative to it.
+     * A failed POST is repeated after a connection error only when the failed transfer went to the instance
+     * with the same method, path, and query (see the README, Retry Mechanism).
      *
      * @param ClientInterface|null $client Guzzle-compatible HTTP client, or null to use default
      * @return $this

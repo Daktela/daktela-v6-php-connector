@@ -65,8 +65,15 @@ trait ExposesTraces
             $isThrowable = $value instanceof \Throwable;
             $value = (array)$value;
             if ($isThrowable) {
-                // Its own trace reaches the test framework; the exception's request and response are kept
-                unset($value["\0Exception\0trace"], $value["\0Error\0trace"]);
+                // Of its own trace only the connector's frames: the others reach the test framework's objects
+                foreach (["\0Exception\0trace", "\0Error\0trace"] as $property) {
+                    if (is_array($value[$property] ?? null)) {
+                        $value[$property] = array_filter(
+                            $value[$property],
+                            static fn ($frame): bool => str_starts_with($frame['class'] ?? '', 'Daktela\\DaktelaV6\\')
+                        );
+                    }
+                }
             }
         }
         if (!is_array($value) || $depth > 12) {

@@ -20,9 +20,10 @@ class RetryConfig
      * @param bool $retryOnConnectionError Whether to retry on connection errors
      * @param bool $retryNonIdempotentRequests Whether POST requests may be retried after timeouts and
      *     retryable status codes. A retry may then repeat an operation the server already performed
-     *     (e.g. create a duplicate record). POST requests are always retried when the connection
-     *     for the request itself could not be established, because the request was never sent; a
-     *     connection failure on a redirect target does not count.
+     *     (e.g. create a duplicate record). With retryOnConnectionError enabled, POST requests are
+     *     retried when Guzzle reports that the connection for the request itself could not be
+     *     established (DNS, connect, or TLS handshake failure), because the request was never sent;
+     *     a connection failure on a redirect target does not count.
      */
     public function __construct(
         private int $maxRetries = 3,

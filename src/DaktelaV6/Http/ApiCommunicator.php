@@ -1262,6 +1262,10 @@ class ApiCommunicator
      * Note: When a custom client is set, the timeout and SSL verification
      * settings from this class are ignored - configure them on your client instead.
      *
+     * The client needs `base_uri` set to the instance URL, because the connector sends paths relative to it.
+     * A failed POST is repeated after a connection error only when the failed transfer went to the instance
+     * with the same method, path, and query (see the README, Retry Mechanism).
+     *
      * @param ClientInterface|null $client Guzzle-compatible HTTP client, or null to use default
      * @return $this
      */

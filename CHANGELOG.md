@@ -14,7 +14,7 @@ All notable changes to this project are documented in this file. The project fol
 ### Changed
 
 - Sent the HTTP method in upper case. Guzzle 7 already did; Guzzle 8 sends the method as given, so `sendRequest('post', ...)` would have sent `post`. This also avoids the deprecation notice PSR-7 2.11 and later trigger for a method that is not in upper case.
-- Retried a network exception of a custom HTTP client (`Psr\Http\Client\NetworkExceptionInterface`) as a connection error, under the same rules as Guzzle's. Previously it was wrapped in a `RequestException` without a retry.
+- Retried a network exception of a custom HTTP client (`Psr\Http\Client\NetworkExceptionInterface`) as a connection error: idempotent requests always, other requests only with `retryNonIdempotentRequests`, because only a Guzzle `ConnectException` shows that the request was not sent. Previously it was wrapped in a `RequestException` without a retry. A Guzzle transfer exception of such a client is chained as a copy without the access token, as Guzzle's own exceptions are.
 - Encoded payloads and parsed responses with PHP's JSON functions instead of Guzzle's JSON helpers, which Guzzle 7.15 deprecated with a notice and Guzzle 8 removed. The messages of the resulting exceptions are unchanged.
 - Declared `psr/http-client` and `ext-json` as dependencies. Guzzle already required them. Raised the `guzzlehttp/psr7` 2.x minimum to 2.13, which Guzzle 7.15.2 already required.
 

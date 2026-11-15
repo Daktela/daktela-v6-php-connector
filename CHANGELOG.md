@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file. The project fol
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-11-15
+
 ### Added
 
 - Supported Guzzle 8 with PSR-7 3 alongside Guzzle 7 with PSR-7 2: the constraints are `guzzlehttp/guzzle: ^7.15.2 || ^8.0.1` and `guzzlehttp/psr7: ^2.13 || ^3.0`, and Composer installs the version that fits the other dependencies of the project. With Guzzle 8:
@@ -159,7 +161,8 @@ Public methods only gained optional parameters, and `ARequest::getResponse()` wi
 
 No public method signatures were changed in this release. The dependency minimums in the Security section are the only compatibility-sensitive upgrade requirement.
 
-[Unreleased]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.8.0...HEAD
+[Unreleased]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.9.0...HEAD
+[2.9.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.8.0...2.9.0
 [2.8.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.7.1...2.8.0
 [2.7.1]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.7.0...2.7.1
 [2.7.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.6.0...2.7.0

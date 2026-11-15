@@ -135,12 +135,16 @@ final class GuzzleCompat
         ?ResponseInterface $response,
         array $context
     ): ?TransferException {
+        // PHP records the current values of the parameters in the trace of the copy, so the exception, whose
+        // request carries the access token, is moved out of them; only its class and code are used below
+        [$class, $code] = [get_class($ex), (int)$ex->getCode()];
+        $ex = null;
         if (!self::isGuzzle8()) {
-            if ($ex instanceof ConnectException) {
+            if (is_a($class, ConnectException::class, true)) {
                 return self::create([ConnectException::class], [$message, $request, null, $context]);
             }
-            if ($ex instanceof RequestException) {
-                $classes = self::withAncestors($ex, self::GUZZLE7_REQUEST_EXCEPTIONS);
+            if (is_a($class, RequestException::class, true)) {
+                $classes = self::withAncestors($class, self::GUZZLE7_REQUEST_EXCEPTIONS);
 
                 return self::create($classes, [$message, $request, $response, null, $context]);
             }
@@ -148,21 +152,21 @@ final class GuzzleCompat
             return null;
         }
 
-        if ($ex instanceof NetworkException) {
-            return self::create(self::withAncestors($ex, self::GUZZLE8_NETWORK_EXCEPTIONS), [$message, $request]);
+        if (is_a($class, NetworkException::class, true)) {
+            return self::create(self::withAncestors($class, self::GUZZLE8_NETWORK_EXCEPTIONS), [$message, $request]);
         }
-        if ($ex instanceof ResponseException && $response !== null) {
+        if (is_a($class, ResponseException::class, true) && $response !== null) {
             // The constructor of ResponseException is final, so every subclass takes these arguments; the
             // ancestors are a fallback all the same
-            $classes = self::withAncestors($ex, self::GUZZLE8_RESPONSE_EXCEPTIONS);
+            $classes = self::withAncestors($class, self::GUZZLE8_RESPONSE_EXCEPTIONS);
 
             return self::create($classes, [$message, $request, $response]);
         }
-        if ($ex instanceof RequestException) {
+        if (is_a($class, RequestException::class, true)) {
             // A request failure without a response, e.g. while reading the request body
-            $classes = self::withAncestors($ex, [RequestException::class]);
+            $classes = self::withAncestors($class, [RequestException::class]);
 
-            return self::create($classes, [$message, $request, (int)$ex->getCode()]);
+            return self::create($classes, [$message, $request, $code]);
         }
 
         return null;
@@ -180,14 +184,14 @@ final class GuzzleCompat
     }
 
     /**
-     * @param TransferException $ex exception to copy
+     * @param string $class class of the exception to copy
      * @param string[] $guzzleClasses Guzzle classes the copy can have, most specific first
      * @return string[] the class of the exception, then its ancestors among the given Guzzle classes
      */
-    private static function withAncestors(TransferException $ex, array $guzzleClasses): array
+    private static function withAncestors(string $class, array $guzzleClasses): array
     {
         // class_parents() does not list the class itself
-        return array_merge([get_class($ex)], array_intersect($guzzleClasses, class_parents($ex)));
+        return array_merge([$class], array_intersect($guzzleClasses, class_parents($class) ?: []));
     }
 
     /**

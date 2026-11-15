@@ -983,6 +983,26 @@ class ApiCommunicatorTest extends TestCase
         $this->assertSame('/api/v6/tickets/comments.json', $history[0]['request']->getUri()->getPath());
     }
 
+    public function testConnectionFailureWithInstanceUrlGuzzleCannotParseIsWrapped(): void
+    {
+        // A custom client has its own base URI; the port of the instance URL is out of range
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com:99999', 'token');
+        $communicator->setHttpClient($this->createMockClient([
+            fn (RequestInterface $request) => GuzzleExceptions::connectFailure($request),
+            $this->okResponse(),
+        ], $history, 'https://example.com'));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        try {
+            $communicator->sendRequest('POST', 'Users', [], ['name' => 'x']);
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertStringContainsString('Failed to connect', $ex->getMessage());
+        }
+        $this->assertCount(1, $history);
+    }
+
     public function testPostIsNotRetriedWhenCustomClientSendsItElsewhere(): void
     {
         // The connector cannot tell a request sent to another host, e.g. through a gateway, from a redirect hop

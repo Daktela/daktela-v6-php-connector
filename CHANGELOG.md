@@ -24,6 +24,7 @@ All notable changes to this project are documented in this file. The project fol
 
 ### Security
 
+- Kept the access token out of the stack-trace arguments of the exceptions the connector throws, and of the token-free copy chained to them. Unless `zend.exception_ignore_args` is on, PHP records the current parameter values of every frame in a trace, and the frames that created these exceptions held the HTTP client's exception, whose request carries the token, or the raw response, which may echo it. `var_dump()`, `print_r()`, `var_export()`, and debug pages that print trace arguments showed the token, for a static token as well as for the access token of a login session. This affected connection errors, HTTP errors, responses that cannot be parsed, and HTTP 429 responses since 2.8.0, and requests rejected before they were sent with query parameter authentication.
 - Stopped chaining an exception as the previous exception of the `RequestException` for a response that cannot be parsed as JSON. Its stack trace held the raw response body, which may contain the access token, as a function argument.
 
 No public method signatures were changed in this release. With Guzzle 7, the connector behaves as in 2.8.0 except for the Changed, Fixed, and Security sections. Review the Added section if your code inspects `getPrevious()` of a `RequestException`, or relies on which network failures are retried, before your project upgrades to Guzzle 8.

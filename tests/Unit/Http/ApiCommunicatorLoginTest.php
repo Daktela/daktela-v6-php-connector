@@ -11,6 +11,8 @@ use Daktela\DaktelaV6\Client as DaktelaClient;
 use Daktela\DaktelaV6\Exception\RateLimitException;
 use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Http\ApiCommunicator;
+use Daktela\Tests\Support\ExposesTraces;
+use Daktela\Tests\Support\GuzzleExceptions;
 use Daktela\Tests\Unit\Auth\TokenSetTest;
 use GuzzleHttp\Client;
 use GuzzleHttp\Handler\MockHandler;
@@ -22,45 +24,13 @@ use Psr\Http\Message\RequestInterface;
 
 class ApiCommunicatorLoginTest extends TestCase
 {
+    use ExposesTraces;
+
     /** @var string owner of the tokens of a session that logs in as api on https://example.com */
     private const OWNER = 'api@https://example.com';
 
     /** @var array history of the requests sent through the mock client */
     private array $history = [];
-    /** @var string|false setting restored after the test */
-    private $ignoreArgs = false;
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-        // Production configurations hide arguments in traces; the tests check the default, which keeps them
-        $this->ignoreArgs = ini_get('zend.exception_ignore_args');
-        ini_set('zend.exception_ignore_args', '0');
-    }
-
-    protected function tearDown(): void
-    {
-        ini_set('zend.exception_ignore_args', (string)$this->ignoreArgs);
-        parent::tearDown();
-    }
-
-    /**
-     * Returns what loggers and error trackers can see of an exception: its string form and the arguments
-     * of the connector's frames in the traces of the whole exception chain.
-     */
-    private static function exposed(\Throwable $ex): string
-    {
-        $text = (string)$ex;
-        for ($current = $ex; $current !== null; $current = $current->getPrevious()) {
-            foreach ($current->getTrace() as $frame) {
-                if (str_starts_with($frame['class'] ?? '', 'Daktela\\DaktelaV6\\')) {
-                    $text .= print_r($frame['args'] ?? [], true);
-                }
-            }
-        }
-
-        return $text;
-    }
 
     private static function seeded(array $tokens): InMemoryTokenStore
     {
@@ -628,6 +598,33 @@ class ApiCommunicatorLoginTest extends TestCase
         } catch (RequestException $ex) {
             $this->assertSame(['Token *** was replaced'], $ex->getApiErrors());
         }
+    }
+
+    /**
+     * @dataProvider sessionRequestFailures
+     */
+    public function testSessionTokensAreNotInTracesOfFailedRequests(callable $failure): void
+    {
+        $tokens = self::tokens('A');
+        $communicator = $this->communicator([$failure($tokens[0])]);
+        $communicator->login('api', 'password', self::seeded($tokens));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $exposed = self::exposed($ex);
+            $this->assertStringNotContainsString($tokens[0], $exposed);
+            $this->assertStringNotContainsString($tokens[1], $exposed);
+        }
+    }
+
+    public static function sessionRequestFailures(): array
+    {
+        return [
+            'connection failure' => [fn (string $token) => fn (RequestInterface $request) => GuzzleExceptions::connectFailure($request)],
+            'HTTP error echoing the token' => [fn (string $token) => new GuzzleResponse(400, ['X-Echo' => $token], '{"error":["' . $token . '"]}')],
+        ];
     }
 
     public function testLogsInAgainWhenRefreshIsUnauthorized(): void

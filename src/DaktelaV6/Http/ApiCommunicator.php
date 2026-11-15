@@ -560,7 +560,7 @@ class ApiCommunicator
 
             if ($statusCode === 429) {
                 $this->handleRateLimit(
-                    $httpResponse,
+                    $httpResponse->getHeaderLine('Retry-After') ?: null,
                     $apiEndpoint,
                     $attempt < $maxAttempts - 1
                 );
@@ -620,10 +620,16 @@ class ApiCommunicator
         // (e.g. by a mock handler), so its origin is not compared.
         $failed = $ex->getRequest()->getUri();
         $sent = $request->getUri();
-        if ($failed->getHost() !== ''
-            && self::leavesInstance(new Uri((string)self::normalizeUrl($this->baseUrl)), $failed)
-        ) {
-            return false;
+        if ($failed->getHost() !== '') {
+            try {
+                $instance = new Uri((string)self::normalizeUrl($this->baseUrl));
+            } catch (\InvalidArgumentException $invalidUrl) {
+                // An instance URL Guzzle cannot parse, used with a custom client: the origin is unknown
+                return false;
+            }
+            if (self::leavesInstance($instance, $failed)) {
+                return false;
+            }
         }
 
         return $ex->getRequest()->getMethod() === $request->getMethod()
@@ -639,23 +645,30 @@ class ApiCommunicator
      */
     private function createHttpException(BadResponseException $ex, ResponseInterface $response): RequestException
     {
+        // PHP records the current values of the parameters in the trace of every exception created below this
+        // frame, so the client's exception and the response, which may carry the token, are moved out of them
+        [$original, $httpResponse] = [$ex, $response];
+        $ex = $response = null;
         try {
-            $body = $this->redact((string)$response->getBody());
+            $body = $this->redact((string)$httpResponse->getBody());
         } catch (\RuntimeException $readError) {
             // e.g. a detached or write-only body of a custom HTTP client
             $body = '';
         }
         $decoded = json_decode($body);
         $apiErrors = is_object($decoded) ? $this->redactValues($this->normalizeErrors($decoded->error ?? null)) : [];
-        $sanitized = $this->sanitize($ex, $body);
-        $message = $sanitized === null ? $this->redact($ex->getMessage()) : $sanitized->getMessage();
+        $sanitized = $this->sanitize($original, $body);
+        $message = $sanitized === null ? $this->redact($original->getMessage()) : $sanitized->getMessage();
         $previous = $this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY ? null : $sanitized;
+        $status = $httpResponse->getStatusCode();
+        $code = $original->getCode();
+        $original = $httpResponse = null;
 
-        if ($response->getStatusCode() === 404) {
+        if ($status === 404) {
             return new NotFoundException($message, $previous, $body, $apiErrors);
         }
 
-        return new RequestException($message, $ex->getCode(), $previous, $response->getStatusCode(), $body, $apiErrors);
+        return new RequestException($message, $code, $previous, $status, $body, $apiErrors);
     }
 
     /**
@@ -741,11 +754,17 @@ class ApiCommunicator
      */
     private function wrapException(Throwable $ex, string $messagePrefix = ''): RequestException
     {
-        $sanitized = $this->sanitize($ex);
-        $message = $sanitized === null ? $this->redact($ex->getMessage()) : $sanitized->getMessage();
+        // PHP records the current values of the parameters in the trace of every exception created below this
+        // frame, so the client's exception, whose request carries the token, is moved out of them
+        $original = $ex;
+        $ex = null;
+        $sanitized = $this->sanitize($original);
+        $message = $sanitized === null ? $this->redact($original->getMessage()) : $sanitized->getMessage();
         $previous = $this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY ? null : $sanitized;
+        $code = (int)$original->getCode();
+        $original = null;
 
-        return new RequestException($messagePrefix . $message, (int)$ex->getCode(), $previous);
+        return new RequestException($messagePrefix . $message, $code, $previous);
     }
 
     /**
@@ -759,29 +778,33 @@ class ApiCommunicator
      */
     private function sanitize(Throwable $ex, ?string $redactedBody = null): ?Throwable
     {
+        // PHP records the current values of the parameters in the trace of the copy created below this frame,
+        // so the client's exception, whose request carries the token, is moved out of them
+        $clientException = $ex;
+        $ex = null;
         // A request exception first: one that also reports itself as a network failure may carry a response
-        if ($ex instanceof GuzzleRequestException) {
-            $request = $this->withoutCredentials($ex->getRequest());
-            $context = $this->redactContext(GuzzleCompat::handlerContext($ex));
-            $original = GuzzleCompat::responseOf($ex);
+        if ($clientException instanceof GuzzleRequestException) {
+            $request = $this->withoutCredentials($clientException->getRequest());
+            $context = $this->redactContext(GuzzleCompat::handlerContext($clientException));
+            $original = GuzzleCompat::responseOf($clientException);
             if ($original === null) {
-                return GuzzleCompat::copy($ex, $this->redact($ex->getMessage()), $request, null, $context);
+                return GuzzleCompat::copy($clientException, $this->redact($clientException->getMessage()), $request, null, $context);
             }
             $response = $this->withoutToken($original, $redactedBody);
-            $message = $ex instanceof BadResponseException && $response->getStatusCode() >= 400
+            $message = $clientException instanceof BadResponseException && $response->getStatusCode() >= 400
                 ? GuzzleRequestException::create($request, $response)->getMessage()
-                : $this->redact($this->withRedactedBodySummary($ex->getMessage(), $original, $response));
+                : $this->redact($this->withRedactedBodySummary($clientException->getMessage(), $original, $response));
 
-            return GuzzleCompat::copy($ex, $message, $request, $response, $context);
+            return GuzzleCompat::copy($clientException, $message, $request, $response, $context);
         }
-        if ($ex instanceof TransferException && $ex instanceof NetworkExceptionInterface) {
+        if ($clientException instanceof TransferException && $clientException instanceof NetworkExceptionInterface) {
             // A connection or network failure without a response
             return GuzzleCompat::copy(
-                $ex,
-                $this->redact($ex->getMessage()),
-                $this->withoutCredentials($ex->getRequest()),
+                $clientException,
+                $this->redact($clientException->getMessage()),
+                $this->withoutCredentials($clientException->getRequest()),
                 null,
-                $this->redactContext(GuzzleCompat::handlerContext($ex))
+                $this->redactContext(GuzzleCompat::handlerContext($clientException))
             );
         }
 
@@ -949,18 +972,18 @@ class ApiCommunicator
     /**
      * Handle rate limit response (HTTP 429).
      *
-     * @param ResponseInterface $response The HTTP response
+     * @param string|null $retryAfterHeader Retry-After header of the response, or null; the response itself is
+     *     not passed, as the trace of the exception thrown here records the arguments
      * @param string $endpoint API endpoint
      * @param bool $canRetry Whether another request attempt is available
      * @return void
      * @throws RateLimitException If auto-retry is disabled or wait time exceeds maximum
      */
     private function handleRateLimit(
-        ResponseInterface $response,
+        ?string $retryAfterHeader,
         string $endpoint,
         bool $canRetry
     ): void {
-        $retryAfterHeader = $response->getHeaderLine('Retry-After') ?: null;
         $waitSeconds = ($this->rateLimitConfig ?? new RateLimitConfig())->parseRetryAfter($retryAfterHeader);
 
         $this->logger?->warning('Rate limit hit', [
@@ -1019,10 +1042,12 @@ class ApiCommunicator
             // Not a valid header value: Guzzle's error would quote the header value, trimmed, so redact() could miss it
             throw new RequestException('The access token contains a line break or another control character.');
         }
+        // A copy: the trace of an exception created here records the parameters, which must not get the token
+        $query = $queryParams;
         if (!$authenticate) {
             // login and token refresh requests carry their credentials in the payload
         } elseif ($this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY) {
-            $queryParams['accessToken'] = $this->currentAccessToken();
+            $query['accessToken'] = $this->currentAccessToken();
         } elseif ($this->authenticationMethod === self::AUTHENTICATION_METHOD_BEARER) {
             $headers['Authorization'] = 'Bearer ' . $this->currentAccessToken();
         } else {
@@ -1032,7 +1057,7 @@ class ApiCommunicator
         // An instance URL that already ends with the API namespace is accepted, as before
         $basePath = rtrim((string)parse_url((string)self::normalizeUrl($this->baseUrl), PHP_URL_PATH), '/');
         $basePath = (string)preg_replace('#/api/v6$#i', '', $basePath);
-        $requestUri = $basePath . self::API_NAMESPACE . lcfirst($apiEndpoint) . ".json?" . http_build_query($queryParams);
+        $requestUri = $basePath . self::API_NAMESPACE . lcfirst($apiEndpoint) . ".json?" . http_build_query($query);
         try {
             $body = $data !== null ? json_encode($data, JSON_THROW_ON_ERROR) : null;
         } catch (\JsonException $ex) {
@@ -1059,7 +1084,12 @@ class ApiCommunicator
      */
     private function parseResponse(ResponseInterface $httpResponse): Response
     {
-        $responseBody = (string)$httpResponse->getBody();
+        $rawBody = (string)$httpResponse->getBody();
+        $status = $httpResponse->getStatusCode();
+        // PHP records the current values of the parameters in the trace of the exception created below, so the
+        // response, whose body may echo the token, is moved out of them
+        $httpResponse = null;
+        $responseBody = $rawBody;
         if (mb_strlen($responseBody)) {
             try {
                 $responseBody = json_decode($responseBody, false, 512, JSON_THROW_ON_ERROR);
@@ -1069,13 +1099,7 @@ class ApiCommunicator
                     'error' => $message,
                 ]);
                 // The exception is not chained: its trace holds the raw response body as an argument
-                throw new RequestException(
-                    $message,
-                    0,
-                    null,
-                    $httpResponse->getStatusCode(),
-                    $this->redact((string)$httpResponse->getBody())
-                );
+                throw new RequestException($message, 0, null, $status, $this->redact($rawBody));
             }
         }
 
@@ -1083,22 +1107,22 @@ class ApiCommunicator
 
         if (!isset($responseBody->result)) {
             $this->logger?->debug('API response received (no result)', [
-                'status' => $httpResponse->getStatusCode(),
+                'status' => $status,
                 'has_errors' => !empty($errors),
             ]);
-            return new Response(null, 0, $errors, $httpResponse->getStatusCode());
+            return new Response(null, 0, $errors, $status);
         }
 
         $responseData = $responseBody->result->data ?? ($responseBody->result ?? null);
         $total = (int)($responseBody->result->total ?? 1);
 
         $this->logger?->debug('API response received', [
-            'status' => $httpResponse->getStatusCode(),
+            'status' => $status,
             'total' => $total,
             'has_errors' => !empty($errors),
         ]);
 
-        return new Response($responseData, $total, $errors, $httpResponse->getStatusCode());
+        return new Response($responseData, $total, $errors, $status);
     }
 
     /**

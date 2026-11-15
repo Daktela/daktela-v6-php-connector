@@ -600,6 +600,43 @@ class ApiCommunicatorLoginTest extends TestCase
         }
     }
 
+    public function testPasswordEchoedByRejectedLoginIsRedacted(): void
+    {
+        $password = 'Pa55/word+';
+        $forms = [$password, 'Pa55\\/word+', rawurlencode($password), urlencode($password)];
+        $logged = [];
+        $logger = $this->createMock(\Psr\Log\LoggerInterface::class);
+        foreach (['debug', 'info', 'warning', 'error'] as $level) {
+            $logger->method($level)->willReturnCallback(function (string $message, array $context = []) use (&$logged): void {
+                $logged[] = $message . json_encode($context);
+            });
+        }
+        $communicator = $this->communicator([new GuzzleResponse(
+            401,
+            ['X-Echo' => $password],
+            json_encode(['error' => ['Wrong password ' . $password], 'sent' => rawurlencode($password)])
+        )]);
+        $communicator->setLogger($logger);
+
+        try {
+            $communicator->login('api', $password);
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame(401, $ex->getHttpStatus());
+            $this->assertSame(['Wrong password ***'], $ex->getApiErrors());
+            $exposed = self::exposed($ex) . $ex->getResponseBody();
+            foreach ($forms as $form) {
+                $this->assertStringNotContainsString($form, $exposed);
+            }
+        }
+        $this->assertNotEmpty($logged);
+        foreach ($logged as $line) {
+            foreach ($forms as $form) {
+                $this->assertStringNotContainsString($form, $line);
+            }
+        }
+    }
+
     /**
      * @dataProvider sessionRequestFailures
      */

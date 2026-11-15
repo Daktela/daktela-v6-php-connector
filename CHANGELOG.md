@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file. The project fol
 
 ## [Unreleased]
 
+### Security
+
+- Redacted the password of a login session from the exception, its stored response body and API errors, and log entries when the server echoes the password in an error response to the login. Other responses are not redacted for the password, as a short password would mangle their text.
+
+### Documentation
+
+- Noted that Guzzle 7 does not retry a connection reset or a truncated body, which it reports as a plain `RequestException`, and that `getCode()` of a transfer that failed after the response headers is the status of the partial response while `getHttpStatus()` is `null`.
+
+The trace checks of the test suite now also cover the connector's frames in the traces of exceptions passed as arguments. No public method signatures were changed in this release.
+
 ## [2.9.0] - 2026-11-15
 
 ### Added

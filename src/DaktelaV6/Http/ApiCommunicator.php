@@ -95,6 +95,8 @@ class ApiCommunicator
      *     the session of the original; an unserialized copy has none.
      */
     private static ?\WeakMap $loginSessions = null;
+    /** @var bool whether redact() also removes the password of the login session, while a login request is sent */
+    private bool $redactPassword = false;
 
     /**
      * ApiCommunicator constructor.
@@ -329,6 +331,9 @@ class ApiCommunicator
                 'client_side_refresh' => 'true',
             ]
             : ['refresh_token' => $current === null ? '' : $current->getRefreshToken()];
+        // An error response to a login may echo the password, so it is redacted from messages, the stored body,
+        // and log entries while the login is sent
+        $this->redactPassword = $apiEndpoint === 'login';
         try {
             $response = $this->dispatch('POST', $apiEndpoint, [], $payload, false);
         } catch (RateLimitException $ex) {
@@ -344,6 +349,8 @@ class ApiCommunicator
         } catch (\Throwable $ex) {
             // Anything else, e.g. from a logger, has frames with the payload as an argument
             throw new RequestException($this->redact($ex->getMessage()));
+        } finally {
+            $this->redactPassword = false;
         }
 
         $result = $response->getData();
@@ -952,6 +959,10 @@ class ApiCommunicator
                 $secrets[] = $session->tokens->getRefreshToken();
             }
             array_push($secrets, ...$session->retiredTokens);
+            if ($this->redactPassword) {
+                // Only while a login is sent: in other responses a short password would mangle the text
+                $secrets[] = $session->password;
+            }
         }
         // Guzzle trims blanks from header values, so the server receives, and may echo, the trimmed token
         foreach (array_unique($secrets) as $token) {

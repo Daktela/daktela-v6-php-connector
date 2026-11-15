@@ -14,19 +14,16 @@ use Daktela\DaktelaV6\Response\Response;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\BadResponseException;
-use GuzzleHttp\Exception\ClientException;
-use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\GuzzleException;
-use GuzzleHttp\Exception\InvalidArgumentException;
 use GuzzleHttp\Exception\RequestException as GuzzleRequestException;
-use GuzzleHttp\Exception\ServerException;
-use GuzzleHttp\Exception\TooManyRedirectsException;
+use GuzzleHttp\Exception\ResponseTransferException;
+use GuzzleHttp\Exception\TransferException;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\Message;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Uri;
 use GuzzleHttp\Psr7\Utils as Psr7Utils;
-use GuzzleHttp\Utils;
+use Psr\Http\Client\NetworkExceptionInterface;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\UriInterface;
@@ -53,16 +50,6 @@ class ApiCommunicator
     private const USER_AGENT = "daktela-v6-php-connector";
     /** @var string[] HTTP methods that can be repeated without changing the result */
     private const IDEMPOTENT_METHODS = ['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'];
-    /** @var int[] cURL error numbers raised before the request is sent (resolve/connect/TLS handshake failures) */
-    private const CURL_ERRORS_BEFORE_SEND = [6, 7, 35];
-    /** @var string[] Guzzle exception classes a copied exception can have, most specific first */
-    private const GUZZLE_REQUEST_EXCEPTIONS = [
-        ClientException::class,
-        ServerException::class,
-        BadResponseException::class,
-        TooManyRedirectsException::class,
-        GuzzleRequestException::class,
-    ];
     /** @var int Largest response body, in bytes, copied into an exception chained as the previous exception */
     private const COPIED_BODY_LIMIT = 1048576;
     /** @var int Deepest nesting of arrays kept in the handler context of a copied exception */
@@ -528,7 +515,10 @@ class ApiCommunicator
                 // inspect its response before deciding whether to retry.
                 $httpException = $ex;
                 $httpResponse = $ex->getResponse();
-            } catch (ConnectException $ex) {
+            } catch (NetworkExceptionInterface | ResponseTransferException $ex) {
+                // No response, or one that broke off after its headers: the connection failed, timed out, or
+                // was reset. Guzzle 7 reports these as ConnectException; Guzzle 8 as NetworkException, or as
+                // ResponseTransferException once the headers were received.
                 $lastException = $ex;
                 $this->logger?->warning('Connection error', [
                     'endpoint' => $apiEndpoint,
@@ -539,7 +529,7 @@ class ApiCommunicator
                 // idempotent requests (or explicitly allowed ones) are repeated then.
                 if ($this->retryConfig === null
                     || !$this->retryConfig->shouldRetryOnConnectionError()
-                    || (!$canRetryAfterSend && !$this->failedBeforeSend($ex))
+                    || (!$canRetryAfterSend && !GuzzleCompat::failedBeforeSend($ex))
                 ) {
                     throw $this->wrapException($ex);
                 }
@@ -606,18 +596,6 @@ class ApiCommunicator
             throw $this->wrapException($lastException, 'Max retries exceeded: ');
         }
         throw new RequestException('Max retries exceeded: Unknown error');
-    }
-
-    /**
-     * Checks whether a connection error happened before the request was sent to the server.
-     * @param ConnectException $ex connection exception raised by the HTTP client
-     * @return bool true when repeating the request cannot duplicate a server-side operation
-     */
-    private function failedBeforeSend(ConnectException $ex): bool
-    {
-        $errno = $ex->getHandlerContext()['errno'] ?? null;
-
-        return is_int($errno) && in_array($errno, self::CURL_ERRORS_BEFORE_SEND, true);
     }
 
     /**
@@ -748,61 +726,33 @@ class ApiCommunicator
      */
     private function sanitize(Throwable $ex, ?string $redactedBody = null): ?Throwable
     {
-        if ($ex instanceof ConnectException) {
-            return new ConnectException(
+        if ($ex instanceof TransferException && $ex instanceof NetworkExceptionInterface) {
+            // A connection or network failure without a response
+            return GuzzleCompat::copy(
+                $ex,
                 $this->redact($ex->getMessage()),
                 $this->withoutCredentials($ex->getRequest()),
                 null,
-                $this->redactContext($ex->getHandlerContext())
+                $this->redactContext(GuzzleCompat::handlerContext($ex))
             );
         }
         if ($ex instanceof GuzzleRequestException) {
             $request = $this->withoutCredentials($ex->getRequest());
-            $context = $this->redactContext($ex->getHandlerContext());
-            $original = $ex->getResponse();
+            $context = $this->redactContext(GuzzleCompat::handlerContext($ex));
+            $original = GuzzleCompat::responseOf($ex);
             if ($original === null) {
-                return $this->copyException($ex, $this->redact($ex->getMessage()), $request, null, $context);
+                return GuzzleCompat::copy($ex, $this->redact($ex->getMessage()), $request, null, $context);
             }
             $response = $this->withoutToken($original, $redactedBody);
             $message = $ex instanceof BadResponseException && $response->getStatusCode() >= 400
                 ? GuzzleRequestException::create($request, $response)->getMessage()
                 : $this->redact($this->withRedactedBodySummary($ex->getMessage(), $original, $response));
 
-            return $this->copyException($ex, $message, $request, $response, $context);
+            return GuzzleCompat::copy($ex, $message, $request, $response, $context);
         }
 
         // Other exceptions cannot be copied, and their own previous exceptions may carry the token
         return null;
-    }
-
-    /**
-     * Creates a Guzzle exception of the class of the given one, or of the nearest Guzzle class when a custom
-     * subclass cannot be created with the Guzzle constructor arguments.
-     * @param GuzzleRequestException $ex exception to copy
-     * @param string $message message of the copy
-     * @param RequestInterface $request request of the copy
-     * @param ResponseInterface|null $response response of the copy
-     * @param array $context handler context of the copy
-     * @return GuzzleRequestException copy of the exception
-     */
-    private function copyException(
-        GuzzleRequestException $ex,
-        string $message,
-        RequestInterface $request,
-        ?ResponseInterface $response,
-        array $context
-    ): GuzzleRequestException {
-        // The class itself, then its Guzzle ancestors, most specific first
-        $classes = array_merge([get_class($ex)], array_intersect(self::GUZZLE_REQUEST_EXCEPTIONS, class_parents($ex)));
-        foreach ($classes as $class) {
-            try {
-                return new $class($message, $request, $response, null, $context);
-            } catch (\Throwable $constructorError) {
-                // A custom subclass with other constructor arguments: try the nearest Guzzle class
-            }
-        }
-
-        return new GuzzleRequestException($message, $request, $response, null, $context);
     }
 
     /**
@@ -820,11 +770,16 @@ class ApiCommunicator
         } catch (\RuntimeException $readError) {
             return $message;
         }
-        if ($summary === null || $summary === '' || strpos($message, $summary) === false) {
+        if ($summary === null || $summary === '') {
+            return $message;
+        }
+        // Guzzle 8 escapes control characters of the summary in its messages
+        $inMessage = GuzzleCompat::summaryInMessage($summary);
+        if (strpos($message, $inMessage) === false) {
             return $message;
         }
 
-        return str_replace($summary, Message::bodySummary($copy) ?? '', $message);
+        return str_replace($inMessage, GuzzleCompat::summaryInMessage(Message::bodySummary($copy) ?? ''), $message);
     }
 
     /**
@@ -1043,14 +998,16 @@ class ApiCommunicator
         $basePath = (string)preg_replace('#/api/v6$#i', '', $basePath);
         $requestUri = $basePath . self::API_NAMESPACE . lcfirst($apiEndpoint) . ".json?" . http_build_query($queryParams);
         try {
-            $body = $data !== null ? Utils::jsonEncode($data) : null;
-        } catch (InvalidArgumentException $ex) {
-            // e.g. a string that is not valid UTF-8; the message does not quote the payload
-            throw new RequestException('The request payload cannot be encoded as JSON: ' . $ex->getMessage());
+            $body = $data !== null ? json_encode($data, JSON_THROW_ON_ERROR) : null;
+        } catch (\JsonException $ex) {
+            // e.g. a string that is not valid UTF-8; the message does not quote the payload, and the exception,
+            // whose trace holds the payload as an argument, is not chained
+            throw new RequestException('The request payload cannot be encoded as JSON: json_encode error: ' . $ex->getMessage());
         }
 
         try {
-            return new Request($method, $requestUri, $headers, $body);
+            // Guzzle 8 sends the method as given, Guzzle 7 in upper case
+            return new Request(strtoupper($method), $requestUri, $headers, $body);
         } catch (\InvalidArgumentException $ex) {
             // An invalid header value, e.g. an access token with a trailing newline, is quoted in the message
             throw new RequestException($this->redact($ex->getMessage()));
@@ -1069,15 +1026,17 @@ class ApiCommunicator
         $responseBody = (string)$httpResponse->getBody();
         if (mb_strlen($responseBody)) {
             try {
-                $responseBody = Utils::jsonDecode($responseBody);
-            } catch (InvalidArgumentException $ex) {
+                $responseBody = json_decode($responseBody, false, 512, JSON_THROW_ON_ERROR);
+            } catch (\JsonException $ex) {
+                $message = 'json_decode error: ' . $ex->getMessage();
                 $this->logger?->error('Failed to parse API response', [
-                    'error' => $ex->getMessage(),
+                    'error' => $message,
                 ]);
+                // The exception is not chained: its trace holds the raw response body as an argument
                 throw new RequestException(
-                    $ex->getMessage(),
-                    $ex->getCode(),
-                    $ex,
+                    $message,
+                    0,
+                    null,
                     $httpResponse->getStatusCode(),
                     $this->redact((string)$httpResponse->getBody())
                 );

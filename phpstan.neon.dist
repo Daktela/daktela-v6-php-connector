@@ -2,3 +2,18 @@ parameters:
     level: 5
     paths:
         - src
+    ignoreErrors:
+        # Guzzle 8 exception classes, which do not exist when the analysis runs against Guzzle 7 (see GuzzleCompat)
+        -
+            message: '#GuzzleHttp\\Exception\\(ResponseException|ResponseTransferException|NetworkException|NetworkTimeoutException|ConnectTimeoutException)\b#'
+            identifier: class.notFound
+            paths:
+                - src/DaktelaV6/Http/ApiCommunicator.php
+                - src/DaktelaV6/Http/GuzzleCompat.php
+            reportUnmatched: false
+        # Guzzle 7 keeps the response on every RequestException; the check is for Guzzle 8
+        -
+            message: '#^Call to function method_exists\(\) with GuzzleHttp\\Exception\\RequestException and ''getResponse'' will always evaluate to true\.$#'
+            identifier: function.alreadyNarrowedType
+            path: src/DaktelaV6/Http/GuzzleCompat.php
+            reportUnmatched: false

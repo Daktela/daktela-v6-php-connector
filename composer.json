@@ -15,9 +15,11 @@
   ],
   "require": {
     "php": ">=8.0",
-    "guzzlehttp/guzzle": "^7.15.2",
-    "guzzlehttp/psr7": "^2.12.3",
+    "guzzlehttp/guzzle": "^7.15.2 || ^8.0.1",
+    "guzzlehttp/psr7": "^2.13 || ^3.0",
+    "ext-json": "*",
     "ext-mbstring": "*",
+    "psr/http-client": "^1.0",
     "psr/log": "^1.0 || ^2.0 || ^3.0"
   },
   "require-dev": {

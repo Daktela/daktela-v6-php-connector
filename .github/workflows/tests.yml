@@ -8,11 +8,17 @@ on:
     branches:
       - main
 
+# The connector supports Guzzle 7 and Guzzle 8. Composer installs only one of them, so every job runs once per
+# major version: `--with` narrows the guzzlehttp/guzzle constraint of composer.json for the job, and
+# guzzlehttp/psr7 follows (Guzzle 7 uses PSR-7 2.x, Guzzle 8 uses PSR-7 3.x).
+
 jobs:
   test:
+    name: PHP ${{ matrix.php-version }}, Guzzle ${{ matrix.guzzle }}${{ matrix.dependencies == 'lowest' && ', lowest dependencies' || '' }}
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false
       matrix:
         php-version:
           - '8.0'
@@ -21,6 +27,19 @@ jobs:
           - '8.3'
           - '8.4'
           - '8.5'
+        guzzle:
+          - '7'
+          - '8'
+        dependencies:
+          - 'highest'
+        include:
+          # The lowest versions composer.json allows, e.g. Guzzle 7.15.2 and Guzzle 8.0.1
+          - php-version: '8.0'
+            guzzle: '7'
+            dependencies: 'lowest'
+          - php-version: '8.0'
+            guzzle: '8'
+            dependencies: 'lowest'
 
     steps:
       - name: Checkout code
@@ -34,13 +53,24 @@ jobs:
           coverage: none
 
       - name: Install dependencies
-        run: composer install --prefer-dist --no-progress --no-interaction
+        run: composer update --prefer-dist --no-progress --no-interaction ${{ matrix.dependencies == 'lowest' && '--prefer-lowest' || '' }} --with "guzzlehttp/guzzle:^${{ matrix.guzzle }}"
+
+      - name: Show Guzzle versions
+        run: composer show 'guzzlehttp/*'
 
       - name: Run PHPUnit tests
         run: vendor/bin/phpunit --configuration phpunit.dist.xml
 
   coverage:
+    name: Coverage, Guzzle ${{ matrix.guzzle }}
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        guzzle:
+          - '7'
+          - '8'
 
     steps:
       - name: Checkout code
@@ -54,7 +84,7 @@ jobs:
           coverage: xdebug
 
       - name: Install dependencies
-        run: composer install --prefer-dist --no-progress --no-interaction
+        run: composer update --prefer-dist --no-progress --no-interaction --with "guzzlehttp/guzzle:^${{ matrix.guzzle }}"
 
       - name: Generate unit-test coverage
         run: vendor/bin/phpunit --configuration phpunit.dist.xml --testsuite Unit --coverage-clover coverage.xml
@@ -63,7 +93,15 @@ jobs:
         run: php tests/Support/check-coverage.php coverage.xml 90
 
   static-analysis:
+    name: PHPStan, Guzzle ${{ matrix.guzzle }}
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        guzzle:
+          - '7'
+          - '8'
 
     steps:
       - name: Checkout code
@@ -77,7 +115,7 @@ jobs:
           coverage: none
 
       - name: Install dependencies
-        run: composer install --prefer-dist --no-progress --no-interaction
+        run: composer update --prefer-dist --no-progress --no-interaction --with "guzzlehttp/guzzle:^${{ matrix.guzzle }}"
 
       - name: Run PHPStan
         run: vendor/bin/phpstan analyse --no-progress

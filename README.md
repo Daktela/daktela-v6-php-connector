@@ -4,7 +4,7 @@ Daktela V6 PHP Connector is a library that enables your PHP application to conne
 
 ## Installation
 
-The connector requires PHP 8.0 or newer, the `mbstring` extension, Guzzle 7.15.2 or newer, and PSR-7 2.12.3 or newer. The recommended way to install it is through Composer:
+The connector requires PHP 8.0 or newer, the `mbstring` extension, and Guzzle 7 (7.15.2 or newer, with PSR-7 2.13 or newer) or Guzzle 8 (8.0.1 or newer, with PSR-7 3). Composer installs the Guzzle version that fits the other dependencies of your project. The recommended way to install it is through Composer:
 
 ```bash
 composer require daktela/daktela-v6-php-connector:^2.5
@@ -437,7 +437,9 @@ When a custom client is set, configure timeouts, TLS verification, `http_errors`
 
 The connector supports automatic retries with exponential backoff for configured HTTP status codes and, optionally, connection errors. `maxRetries` is the number of additional attempts after the initial request. With Guzzle's default `http_errors` setting, other HTTP errors continue to throw `RequestException` without retrying.
 
-Create requests (`POST`) are not idempotent: a timeout or a 5xx response does not prove that the server did not create the record, so repeating them could create duplicates. They are therefore retried only when the connection could not be established (DNS, connect, or TLS handshake failure) or on HTTP 429. Set `retryNonIdempotentRequests: true` to retry them in all retryable cases. Read, update, and delete requests are retried in all retryable cases.
+Connection errors are transfers that end without a complete response. Guzzle 7 reports connection failures and timeouts as `ConnectException`. Guzzle 8 reports connection failures, timeouts, and connection resets as `NetworkException`, and a response that broke off after its headers, for example on a timeout, as `ResponseTransferException`.
+
+Create requests (`POST`) are not idempotent: a timeout or a 5xx response does not prove that the server did not create the record, so repeating them could create duplicates. They are therefore retried only when the connection could not be established (DNS, connect, or TLS handshake failure) or on HTTP 429. With Guzzle 8, a connect timeout also counts as a failure to establish the connection; with Guzzle 7, a timeout is never retried for them, because Guzzle 7 does not report in which phase it happened. Set `retryNonIdempotentRequests: true` to retry them in all retryable cases. Read, update, and delete requests are retried in all retryable cases.
 
 ```php
 use Daktela\DaktelaV6\Http\RetryConfig;

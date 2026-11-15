@@ -10,6 +10,9 @@ use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Http\ApiCommunicator;
 use Daktela\DaktelaV6\Http\RateLimitConfig;
 use Daktela\DaktelaV6\Http\RetryConfig;
+use Daktela\Tests\Support\Guzzle7StrictClientException;
+use Daktela\Tests\Support\GuzzleExceptions;
+use Daktela\Tests\Support\StrictRequestException;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\BadResponseException;
@@ -826,16 +829,6 @@ class ApiCommunicatorTest extends TestCase
         );
     }
 
-    private function connectError(int $errno): ConnectException
-    {
-        return new ConnectException(
-            "cURL error {$errno}",
-            new Request('POST', '/api/v6/users.json'),
-            null,
-            ['errno' => $errno]
-        );
-    }
-
     private function okResponse(): GuzzleResponse
     {
         return new GuzzleResponse(200, [], json_encode(['error' => [], 'result' => ['data' => [], 'total' => 0]]));
@@ -864,7 +857,7 @@ class ApiCommunicatorTest extends TestCase
     {
         $history = [];
         $communicator = new ApiCommunicator('https://example.com', 'token');
-        $communicator->setHttpClient($this->createMockClient([$this->connectError(28), $this->okResponse()], $history));
+        $communicator->setHttpClient($this->createMockClient([GuzzleExceptions::timeoutBeforeResponse(new Request('POST', '/api/v6/users.json')), $this->okResponse()], $history));
         $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
 
         try {
@@ -879,7 +872,7 @@ class ApiCommunicatorTest extends TestCase
     {
         $history = [];
         $communicator = new ApiCommunicator('https://example.com', 'token');
-        $communicator->setHttpClient($this->createMockClient([$this->connectError(7), $this->okResponse()], $history));
+        $communicator->setHttpClient($this->createMockClient([GuzzleExceptions::connectFailure(new Request('POST', '/api/v6/users.json')), $this->okResponse()], $history));
         $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
 
         $this->assertTrue($communicator->sendRequest('POST', 'Users', [], ['name' => 'x'])->isSuccess());
@@ -905,7 +898,7 @@ class ApiCommunicatorTest extends TestCase
     {
         $history = [];
         $communicator = new ApiCommunicator('https://example.com', 'token');
-        $communicator->setHttpClient($this->createMockClient([$this->connectError(28), $this->okResponse()], $history));
+        $communicator->setHttpClient($this->createMockClient([GuzzleExceptions::timeoutBeforeResponse(new Request('POST', '/api/v6/users.json')), $this->okResponse()], $history));
         $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0, retryNonIdempotentRequests: true));
 
         $this->assertTrue($communicator->sendRequest('POST', 'Users', [], ['name' => 'x'])->isSuccess());
@@ -942,7 +935,9 @@ class ApiCommunicatorTest extends TestCase
             $this->fail('Expected RequestException');
         } catch (RequestException $ex) {
             $this->assertStringNotContainsString('SECRET', $ex->getMessage());
-            $this->assertStringContainsString('accessToken=***', $ex->getMessage());
+            // Guzzle 7 and early Guzzle 8 versions put the URL with its query, the token redacted, in the message;
+            // later Guzzle 8 versions leave the query out
+            $this->assertMatchesRegularExpression('#`GET /api/v6/users\.json(\?accessToken=\*\*\*)?`#', $ex->getMessage());
         }
         $this->assertNotEmpty($logged);
         foreach ($logged as $line) {
@@ -1099,7 +1094,11 @@ class ApiCommunicatorTest extends TestCase
     {
         $communicator = new ApiCommunicator('https://example.com', 'SECRET');
         $communicator->setHttpClient($this->createMockClient([
-            new ConnectException('Connection refused', new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET'])),
+            new ConnectException(
+                'Connection refused',
+                new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET']),
+                new \RuntimeException('Stream failed for SECRET')
+            ),
         ]));
 
         try {
@@ -1110,6 +1109,8 @@ class ApiCommunicatorTest extends TestCase
             $this->assertInstanceOf(ConnectException::class, $previous);
             $this->assertSame('Connection refused', $previous->getMessage());
             $this->assertFalse($previous->getRequest()->hasHeader('X-AUTH-TOKEN'));
+            // The client's own previous exception, and its trace, may carry the token
+            $this->assertNull($previous->getPrevious());
         }
     }
 
@@ -1298,8 +1299,7 @@ class ApiCommunicatorTest extends TestCase
         $body = Psr7Utils::streamFor('partial SECRET');
         $body->detach();
         $httpClient = $this->createMock(ClientInterface::class);
-        $httpClient->method('send')->willThrowException(new GuzzleRequestException(
-            'cURL error 56: Recv failure',
+        $httpClient->method('send')->willThrowException(GuzzleExceptions::brokenResponse(
             new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET']),
             new GuzzleResponse(200, [], $body)
         ));
@@ -1318,8 +1318,7 @@ class ApiCommunicatorTest extends TestCase
     public function testLargePartialResponseBodyIsNotCopiedIntoPreviousException(): void
     {
         $httpClient = $this->createMock(ClientInterface::class);
-        $httpClient->method('send')->willThrowException(new GuzzleRequestException(
-            'cURL error 56: Recv failure',
+        $httpClient->method('send')->willThrowException(GuzzleExceptions::brokenResponse(
             new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET']),
             new GuzzleResponse(200, [], str_repeat('x', 2 * 1024 * 1024))
         ));
@@ -1334,8 +1333,10 @@ class ApiCommunicatorTest extends TestCase
         }
     }
 
-    public function testPreviousExceptionRedactsTokenInResponseHeadersAndHandlerContext(): void
+    public function testPreviousExceptionRedactsTokenInHandlerContext(): void
     {
+        // Guzzle 8 exceptions have no handler context
+        GuzzleExceptions::requireGuzzle7($this);
         $httpClient = $this->createMock(ClientInterface::class);
         $httpClient->method('send')->willThrowException(new ConnectException(
             'Connection reset',
@@ -1352,7 +1353,11 @@ class ApiCommunicatorTest extends TestCase
         } catch (RequestException $ex) {
             $this->assertStringNotContainsString('SECRET', $ex->getPrevious()->getHandlerContext()['request_header']);
         }
+    }
 
+    public function testPreviousExceptionRedactsTokenInResponseHeaders(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
         $communicator->setHttpClient($this->createMockClient([
             new GuzzleResponse(401, ['X-Echo' => 'SECRET'], '{}'),
         ]));
@@ -1366,6 +1371,7 @@ class ApiCommunicatorTest extends TestCase
 
     public function testSelfReferencingHandlerContextDoesNotBreakErrorHandling(): void
     {
+        GuzzleExceptions::requireGuzzle7($this);
         $object = new \stdClass();
         $object->self = $object;
         $array = ['level' => 'SECRET'];
@@ -1528,6 +1534,8 @@ class ApiCommunicatorTest extends TestCase
      */
     public function testPostRetryOnConnectErrorDependsOnWhetherRequestWasSent(?int $errno, int $expectedRequests): void
     {
+        // Guzzle 7 reports timeouts as ConnectException as well, so the cURL error number decides
+        GuzzleExceptions::requireGuzzle7($this);
         $history = [];
         $error = new ConnectException('cURL error', new Request('POST', '/'), null, $errno === null ? [] : ['errno' => $errno]);
         $communicator = new ApiCommunicator('https://example.com', 'token');
@@ -1553,6 +1561,342 @@ class ApiCommunicatorTest extends TestCase
             'receive failure' => [56, 1],
             'unknown' => [null, 1],
         ];
+    }
+
+    /**
+     * @dataProvider postNetworkErrorProvider
+     */
+    public function testPostRetryOnNetworkErrorDependsOnWhetherRequestWasSent(string $class, int $expectedRequests): void
+    {
+        // Guzzle 8 throws ConnectException only when the connection could not be established
+        GuzzleExceptions::requireGuzzle8($this);
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([new $class('failure', new Request('POST', '/')), $this->okResponse()], $history));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        try {
+            $communicator->sendRequest('POST', 'Users', [], ['name' => 'x']);
+        } catch (RequestException $ex) {
+            // Not retried
+        }
+
+        $this->assertCount($expectedRequests, $history);
+    }
+
+    public static function postNetworkErrorProvider(): array
+    {
+        return [
+            'could not connect' => [ConnectException::class, 2],
+            'connect timeout' => [\GuzzleHttp\Exception\ConnectTimeoutException::class, 2],
+            'timeout before the response' => [\GuzzleHttp\Exception\NetworkTimeoutException::class, 1],
+            'connection reset before the response' => [\GuzzleHttp\Exception\NetworkException::class, 1],
+        ];
+    }
+
+    public function testGetIsRetriedAfterTimeoutBeforeResponse(): void
+    {
+        // Guzzle 8 reports the timeout as NetworkTimeoutException, which is not a ConnectException
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([
+            GuzzleExceptions::timeoutBeforeResponse(new Request('GET', '/')),
+            $this->okResponse(),
+        ], $history));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        $this->assertTrue($communicator->sendRequest('GET', 'Users')->isSuccess());
+        $this->assertCount(2, $history);
+    }
+
+    public function testGetIsRetriedAfterResponseTimeout(): void
+    {
+        // Guzzle 7 reported a timeout after the response headers as ConnectException as well
+        GuzzleExceptions::requireGuzzle8($this);
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([
+            new \GuzzleHttp\Exception\ResponseTimeoutException('cURL error 28', new Request('GET', '/'), new GuzzleResponse(200)),
+            $this->okResponse(),
+        ], $history));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        $this->assertTrue($communicator->sendRequest('GET', 'Users')->isSuccess());
+        $this->assertCount(2, $history);
+    }
+
+    public function testPostIsNotRetriedWhenResponseBrokeOff(): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([
+            GuzzleExceptions::brokenResponse(new Request('POST', '/'), new GuzzleResponse(200)),
+            $this->okResponse(),
+        ], $history));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        try {
+            $communicator->sendRequest('POST', 'Users', [], ['name' => 'x']);
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame('cURL error 56: Recv failure', $ex->getMessage());
+        }
+        $this->assertCount(1, $history);
+    }
+
+    public function testNetworkExceptionOfCustomClientIsRetriedAndNotChained(): void
+    {
+        $error = new class ('Proxy reset for SECRET', new Request('GET', '/')) extends \RuntimeException implements \Psr\Http\Client\NetworkExceptionInterface {
+            private RequestInterface $request;
+
+            public function __construct(string $message, RequestInterface $request)
+            {
+                parent::__construct($message);
+                $this->request = $request;
+            }
+
+            public function getRequest(): RequestInterface
+            {
+                return $this->request;
+            }
+        };
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->expects($this->exactly(4))
+            ->method('send')
+            ->will($this->onConsecutiveCalls(
+                $this->throwException($error),
+                $this->okResponse(),
+                $this->throwException($error),
+                $this->throwException($error)
+            ));
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($httpClient);
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        $this->assertTrue($communicator->sendRequest('GET', 'Users')->isSuccess());
+
+        // Nothing proves that the request was not sent, so a POST is not repeated
+        try {
+            $communicator->sendRequest('POST', 'Users', [], ['name' => 'x']);
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame('Proxy reset for ***', $ex->getMessage());
+        }
+
+        $communicator->setRetryConfig(null);
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame('Proxy reset for ***', $ex->getMessage());
+            // Not a Guzzle exception: its own previous exceptions may carry the token
+            $this->assertNull($ex->getPrevious());
+        }
+    }
+
+    public function testNetworkErrorIsChainedAsCopyOfItsClassWithoutToken(): void
+    {
+        GuzzleExceptions::requireGuzzle8($this);
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(new \GuzzleHttp\Exception\NetworkTimeoutException(
+            'Timed out sending SECRET',
+            new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET', 'Authorization' => 'Bearer SECRET']),
+            new \RuntimeException('Stream failed for SECRET')
+        ));
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $previous = $ex->getPrevious();
+            $this->assertInstanceOf(\GuzzleHttp\Exception\NetworkTimeoutException::class, $previous);
+            $this->assertSame('Timed out sending ***', $ex->getMessage());
+            $this->assertSame('Timed out sending ***', $previous->getMessage());
+            $this->assertFalse($previous->getRequest()->hasHeader('X-AUTH-TOKEN'));
+            $this->assertFalse($previous->getRequest()->hasHeader('Authorization'));
+            $this->assertNull($previous->getPrevious());
+        }
+    }
+
+    public function testResponseTimeoutIsChainedAsCopyWithResponseWithoutToken(): void
+    {
+        GuzzleExceptions::requireGuzzle8($this);
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(new \GuzzleHttp\Exception\ResponseTimeoutException(
+            'Response body stalled',
+            new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET']),
+            new GuzzleResponse(200, ['X-Echo' => 'SECRET'], '{"partial":"SECRET'),
+            new \RuntimeException('Read failed for SECRET')
+        ));
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $previous = $ex->getPrevious();
+            $this->assertInstanceOf(\GuzzleHttp\Exception\ResponseTimeoutException::class, $previous);
+            $this->assertSame('{"partial":"***', (string)$previous->getResponse()->getBody());
+            $this->assertSame('***', $previous->getResponse()->getHeaderLine('X-Echo'));
+            $this->assertFalse($previous->getRequest()->hasHeader('X-AUTH-TOKEN'));
+            $this->assertNull($previous->getPrevious());
+        }
+    }
+
+    public function testCustomRequestExceptionWithOtherConstructorFallsBackToGuzzleRequestException(): void
+    {
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(new StrictRequestException(
+            new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET']),
+            new \RuntimeException('Request body failed for SECRET')
+        ));
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame('Strict request failure', $ex->getMessage());
+            $this->assertSame(GuzzleRequestException::class, get_class($ex->getPrevious()));
+            $this->assertFalse($ex->getPrevious()->getRequest()->hasHeader('X-AUTH-TOKEN'));
+            $this->assertNull($ex->getPrevious()->getPrevious());
+        }
+    }
+
+    public function testBodySummaryWithLineBreakDoesNotKeepPartOfToken(): void
+    {
+        // Guzzle 8 escapes the line break of the summary in the message
+        $token = str_repeat('a1b2c3d4e5', 4);
+        $response = new GuzzleResponse(200, [], "line\n" . str_repeat('x', 90) . ' ' . $token);
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(GuzzleRequestException::create(new Request('GET', '/'), $response));
+        $communicator = new ApiCommunicator('https://example.com', $token);
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertStringContainsString('200 OK', $ex->getMessage());
+            $this->assertStringContainsString(' ***', $ex->getMessage());
+            $this->assertStringNotContainsString(substr($token, 0, 10), $ex->getMessage());
+            $this->assertStringNotContainsString(substr($token, 0, 10), $ex->getPrevious()->getMessage());
+        }
+    }
+
+    public function testExceptionWithResponseThatIsAlsoANetworkFailureKeepsRedactedResponse(): void
+    {
+        // The response is not dropped although the exception also implements NetworkExceptionInterface
+        $token = str_repeat('a1b2c3d4e5', 4);
+        $request = new Request('GET', '/', ['X-AUTH-TOKEN' => $token]);
+        $response = new GuzzleResponse(200, [], json_encode(['error' => [str_repeat('x', 90) . ' ' . $token]]));
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(new \Daktela\Tests\Support\NetworkBadResponseException(
+            GuzzleRequestException::create($request, $response)->getMessage(),
+            $request,
+            $response
+        ));
+        $communicator = new ApiCommunicator('https://example.com', $token);
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertStringNotContainsString(substr($token, 0, 10), $ex->getMessage());
+            $previous = $ex->getPrevious();
+            $this->assertInstanceOf(\Daktela\Tests\Support\NetworkBadResponseException::class, $previous);
+            $this->assertStringContainsString(' ***', (string)$previous->getResponse()->getBody());
+        }
+    }
+
+    public function testBodySummaryInMessageOfCustomClientIsReplacedWhetherEscapedOrNot(): void
+    {
+        // A custom client may put the summary in its message unescaped, also on Guzzle 8
+        $token = str_repeat('a1b2c3d4e5', 4);
+        $request = new Request('GET', '/');
+        $response = new GuzzleResponse(200, [], "line\n" . str_repeat('x', 90) . ' ' . $token);
+        $httpClient = $this->createMock(ClientInterface::class);
+        $httpClient->method('send')->willThrowException(new BadResponseException(
+            "Unexpected response:\n" . \GuzzleHttp\Psr7\Message::bodySummary($response),
+            $request,
+            $response
+        ));
+        $communicator = new ApiCommunicator('https://example.com', $token);
+        $communicator->setHttpClient($httpClient);
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertStringContainsString(' ***', $ex->getMessage());
+            $this->assertStringNotContainsString(substr($token, 0, 10), $ex->getMessage());
+        }
+    }
+
+    public function testConnectionErrorLogDoesNotKeepPartOfTokenFromBodySummary(): void
+    {
+        $logged = [];
+        $logger = $this->createMock(LoggerInterface::class);
+        foreach (['debug', 'info', 'warning', 'error'] as $level) {
+            $logger->method($level)->willReturnCallback(function (string $message, array $context = []) use (&$logged): void {
+                $logged[] = $message . json_encode($context);
+            });
+        }
+        $token = str_repeat('a1b2c3d4e5', 4);
+        $response = new GuzzleResponse(200, [], str_repeat('x', 90) . ' ' . $token);
+        $communicator = new ApiCommunicator('https://example.com', $token);
+        $communicator->setLogger($logger);
+        $communicator->setHttpClient($this->createMockClient([
+            fn (RequestInterface $request) => GuzzleExceptions::brokenResponse(
+                $request,
+                $response,
+                'Response broke off: ' . \GuzzleHttp\Psr7\Message::bodySummary($response)
+            ),
+        ]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertStringNotContainsString(substr($token, 0, 10), $ex->getMessage());
+        }
+        $this->assertNotEmpty($logged);
+        foreach ($logged as $line) {
+            $this->assertStringNotContainsString(substr($token, 0, 10), $line);
+        }
+    }
+
+    public function testMethodIsSentInUpperCase(): void
+    {
+        // Guzzle 8 sends the method as given
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([$this->okResponse()], $history));
+
+        $communicator->sendRequest('post', 'Users', [], ['name' => 'x']);
+
+        $this->assertSame('POST', $history[0]['request']->getMethod());
+    }
+
+    public function testUnparsableResponseIsNotChained(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'SECRET');
+        $communicator->setHttpClient($this->createMockClient([new GuzzleResponse(200, [], '<html>SECRET</html>')]));
+
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertSame('json_decode error: Syntax error', $ex->getMessage());
+            $this->assertSame(0, $ex->getCode());
+            // The JSON exception's trace holds the raw body as an argument
+            $this->assertNull($ex->getPrevious());
+        }
     }
 
     /**
@@ -1584,11 +1928,9 @@ class ApiCommunicatorTest extends TestCase
                 $logged[] = $message . json_encode($context);
             });
         }
-        $connectError = fn(): ConnectException => new ConnectException(
-            'cURL error 7: Failed to connect for https://example.com/?accessToken=SECRET',
+        $connectError = fn(): ConnectException => GuzzleExceptions::connectFailure(
             new Request('GET', '/?accessToken=SECRET'),
-            null,
-            ['errno' => 7]
+            'cURL error 7: Failed to connect for https://example.com/?accessToken=SECRET'
         );
         $communicator = new ApiCommunicator('https://example.com', 'SECRET');
         $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_QUERY);
@@ -1598,7 +1940,7 @@ class ApiCommunicatorTest extends TestCase
             $connectError(),
             $connectError(),
             $connectError(),
-            new \GuzzleHttp\Exception\TransferException('Transfer failed for /?accessToken=SECRET'),
+            GuzzleExceptions::transferException('Transfer failed for /?accessToken=SECRET', new Request('GET', '/?accessToken=SECRET')),
         ]));
 
         $messages = [];
@@ -1707,7 +2049,8 @@ class ApiCommunicatorTest extends TestCase
         $httpClient->method('send')->willThrowException(new CustomBadResponseException(
             'Redirect refused',
             new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET']),
-            new GuzzleResponse(302)
+            new GuzzleResponse(302),
+            new \InvalidArgumentException('Invalid Location for SECRET')
         ));
         $communicator = new ApiCommunicator('https://example.com', 'SECRET');
         $communicator->setHttpClient($httpClient);
@@ -1718,13 +2061,16 @@ class ApiCommunicatorTest extends TestCase
         } catch (RequestException $ex) {
             $this->assertInstanceOf(CustomBadResponseException::class, $ex->getPrevious());
             $this->assertSame('Redirect refused', $ex->getPrevious()->getMessage());
+            $this->assertNull($ex->getPrevious()->getPrevious());
         }
     }
 
     public function testCustomGuzzleExceptionWithOtherConstructorFallsBackToNearestGuzzleClass(): void
     {
+        // Guzzle 8 does not allow a subclass of ClientException to override the constructor
+        GuzzleExceptions::requireGuzzle7($this);
         $httpClient = $this->createMock(ClientInterface::class);
-        $httpClient->method('send')->willThrowException(new CustomStrictClientException(
+        $httpClient->method('send')->willThrowException(new Guzzle7StrictClientException(
             new Request('GET', '/', ['X-AUTH-TOKEN' => 'SECRET']),
             new GuzzleResponse(401, [], '{}')
         ));
@@ -1795,12 +2141,4 @@ class ApiCommunicatorTest extends TestCase
 
 class CustomBadResponseException extends BadResponseException
 {
-}
-
-class CustomStrictClientException extends ClientException
-{
-    public function __construct(RequestInterface $request, \Psr\Http\Message\ResponseInterface $response)
-    {
-        parent::__construct('Strict client failure', $request, $response);
-    }
 }

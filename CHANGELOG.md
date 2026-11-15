@@ -7,7 +7,7 @@ All notable changes to this project are documented in this file. The project fol
 ### Added
 
 - Supported Guzzle 8 with PSR-7 3 alongside Guzzle 7 with PSR-7 2: the constraints are `guzzlehttp/guzzle: ^7.15.2 || ^8.0.1` and `guzzlehttp/psr7: ^2.13 || ^3.0`, and Composer installs the version that fits the other dependencies of the project. With Guzzle 8:
-  - Network failures without a response (`NetworkException`, such as a timeout or a connection reset before the response headers) and responses that broke off after their headers (`ResponseTransferException`, such as `ResponseTimeoutException`) are retried as connection errors: idempotent requests always, other requests only with `retryNonIdempotentRequests`. Guzzle 8 throws `ConnectException` only when the connection could not be established, so a `ConnectException`, including a connect timeout, is retried for `POST` requests as well.
+  - Network failures without a response (`NetworkException`, such as a timeout or a connection reset before the response headers) and responses that broke off after their headers (`ResponseTransferException`, such as `ResponseTimeoutException`) are retried as connection errors: idempotent requests always, other requests only with `retryNonIdempotentRequests`. Guzzle 8 throws `ConnectException` only when the connection could not be established, so a `ConnectException`, including a connect timeout, is retried for `POST` requests as well, unless it happened on a redirect hop (see Fixed).
   - The previous exception of a `RequestException` is a copy of the Guzzle 8 exception of the same class without the access token, as with Guzzle 7. Guzzle 8 exceptions have no handler context, and Guzzle 8.1 and later leave the query out of the URL in their messages.
   - The redacted body summary also replaces the raw one in messages where Guzzle 8 escapes line breaks and other control characters, so a token cut at the 120-byte limit leaves no fragment.
 
@@ -18,11 +18,15 @@ All notable changes to this project are documented in this file. The project fol
 - Encoded payloads and parsed responses with PHP's JSON functions instead of Guzzle's JSON helpers, which Guzzle 7.15 deprecated with a notice and Guzzle 8 removed. The messages of the resulting exceptions are unchanged.
 - Declared `psr/http-client` and `ext-json` as dependencies. Guzzle already required them. Raised the `guzzlehttp/psr7` 2.x minimum to 2.13, which Guzzle 7.15.2 already required.
 
+### Fixed
+
+- Stopped repeating a create request (`POST`) when the connection failed on a redirect hop, for example when the server answered the request with 303 See Other after creating a record and the redirect target could not be reached. Only a connection failure of the request the connector sent counts as proof that the request was not sent. Previously the request could create a duplicate record: with Guzzle 7 when the redirect target could not be resolved or connected to, or its TLS handshake failed; with Guzzle 8 on any `ConnectException`. The connector tells the request from a redirect hop by its method, path, and query, so a custom HTTP client that rewrites them, for example by signing the query, no longer gets a `POST` retried after its connection failed.
+
 ### Security
 
 - Stopped chaining an exception as the previous exception of the `RequestException` for a response that cannot be parsed as JSON. Its stack trace held the raw response body, which may contain the access token, as a function argument.
 
-No public method signatures were changed in this release. With Guzzle 7, the connector behaves as in 2.8.0 except for the Security and Changed sections. Review the Added section if your code inspects `getPrevious()` of a `RequestException`, or relies on which network failures are retried, before your project upgrades to Guzzle 8.
+No public method signatures were changed in this release. With Guzzle 7, the connector behaves as in 2.8.0 except for the Changed, Fixed, and Security sections. Review the Added section if your code inspects `getPrevious()` of a `RequestException`, or relies on which network failures are retried, before your project upgrades to Guzzle 8.
 
 ## [2.8.0] - 2026-10-14
 

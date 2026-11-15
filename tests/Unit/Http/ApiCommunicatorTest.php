@@ -41,14 +41,18 @@ class ApiCommunicatorTest extends TestCase
         return $property->getValue($object);
     }
 
-    private function createMockClient(array $responses, ?array &$history = null): Client
+    /**
+     * @param array|null $history receives every request that reaches the mock handler, including redirect hops
+     * @param string|null $baseUri base URI of the client, which makes the request URIs absolute
+     */
+    private function createMockClient(array $responses, ?array &$history = null, ?string $baseUri = null): Client
     {
         $mock = new MockHandler($responses);
         $handlerStack = HandlerStack::create($mock);
         if ($history !== null) {
             $handlerStack->push(Middleware::history($history));
         }
-        return new Client(['handler' => $handlerStack]);
+        return new Client(array_filter(['handler' => $handlerStack, 'base_uri' => $baseUri]));
     }
 
     public function testConstructor(): void
@@ -872,11 +876,131 @@ class ApiCommunicatorTest extends TestCase
     {
         $history = [];
         $communicator = new ApiCommunicator('https://example.com', 'token');
-        $communicator->setHttpClient($this->createMockClient([GuzzleExceptions::connectFailure(new Request('POST', '/api/v6/users.json')), $this->okResponse()], $history));
+        $communicator->setHttpClient($this->createMockClient([
+            fn (RequestInterface $request) => GuzzleExceptions::connectFailure($request),
+            $this->okResponse(),
+        ], $history));
         $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
 
         $this->assertTrue($communicator->sendRequest('POST', 'Users', [], ['name' => 'x'])->isSuccess());
         $this->assertCount(2, $history);
+    }
+
+    /**
+     * @dataProvider redirectStatusProvider
+     */
+    public function testPostIsNotRepeatedWhenRedirectTargetCannotBeReached(int $status): void
+    {
+        // The server received the POST and answered with a redirect, e.g. 303 See Other after creating the record;
+        // a connection failure on the redirect hop does not mean that the POST was not sent
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse($status, ['Location' => 'https://other.example.org/created/1']),
+            fn (RequestInterface $hop) => GuzzleExceptions::connectFailure($hop),
+            $this->okResponse(),
+        ], $history));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        try {
+            $communicator->sendRequest('POST', 'Users', [], ['name' => 'x']);
+            $this->fail('Expected RequestException');
+        } catch (RequestException $ex) {
+            $this->assertStringContainsString('Failed to connect', $ex->getMessage());
+        }
+        $this->assertCount(2, $history, 'The POST must not be sent again');
+        $this->assertSame('https://other.example.org/created/1', (string)$history[1]['request']->getUri());
+    }
+
+    public static function redirectStatusProvider(): array
+    {
+        return [
+            '301 Moved Permanently' => [301],
+            '302 Found' => [302],
+            '303 See Other' => [303],
+            '307 Temporary Redirect' => [307],
+            '308 Permanent Redirect' => [308],
+        ];
+    }
+
+    /**
+     * @dataProvider redirectHopProvider
+     */
+    public function testPostIsRepeatedOnlyWhenTheHopThatFailedIsTheSentRequest(int $status, string $location, bool $repeated): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        // With a base URI, a relative Location resolves to an absolute URL that the client follows
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse($status, ['Location' => $location]),
+            fn (RequestInterface $hop) => GuzzleExceptions::connectFailure($hop),
+            $this->okResponse(),
+        ], $history, 'https://example.com'));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        try {
+            $this->assertTrue($communicator->sendRequest('POST', 'Users', [], ['name' => 'x'])->isSuccess());
+            $this->assertTrue($repeated, 'The POST must not be sent again');
+        } catch (RequestException $ex) {
+            $this->assertFalse($repeated, 'The POST should have been sent again');
+        }
+        $this->assertCount($repeated ? 3 : 2, $history);
+        $expectedHop = str_starts_with($location, 'https://') ? $location : 'https://example.com' . $location;
+        $this->assertSame($expectedHop, (string)$history[1]['request']->getUri());
+    }
+
+    public static function redirectHopProvider(): array
+    {
+        return [
+            // 303 See Other to the same URL: the hop differs from the POST only in its method
+            'same URL, GET' => [303, '/api/v6/users.json', false],
+            'same path, other query' => [307, '/api/v6/users.json?page=2', false],
+            // Accepted: a server redirecting the request to the same resource elsewhere is assumed not to have processed it
+            'same path and query on another origin' => [307, 'https://other.example.org/api/v6/users.json', true],
+        ];
+    }
+
+    public function testGetIsRetriedWhenRedirectTargetCannotBeReached(): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([
+            new GuzzleResponse(302, ['Location' => 'https://other.example.org/users.json']),
+            fn (RequestInterface $hop) => GuzzleExceptions::connectFailure($hop),
+            $this->okResponse(),
+        ], $history));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        $this->assertTrue($communicator->sendRequest('GET', 'Users')->isSuccess());
+        $this->assertCount(3, $history);
+    }
+
+    /**
+     * @dataProvider authenticationMethods
+     */
+    public function testPostIsRetriedWhenItsOwnConnectionFails(int $method, string $expectedUri): void
+    {
+        // The exception carries the request as the HTTP client sent it, resolved against its base URI
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'to+k/en=');
+        $communicator->setAuthenticationMethod($method);
+        $communicator->setHttpClient($this->createMockClient([
+            fn (RequestInterface $request) => GuzzleExceptions::connectFailure($request),
+            $this->okResponse(),
+        ], $history, 'https://example.com'));
+        $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
+
+        $this->assertTrue($communicator->sendRequest('POST', 'Users', ['a' => 'b c'], ['name' => 'x'])->isSuccess());
+        $this->assertCount(2, $history);
+        $this->assertSame($expectedUri, (string)$history[0]['request']->getUri());
+    }
+
+    public static function authenticationMethods(): array
+    {
+        return [
+            'header' => [ApiCommunicator::AUTHENTICATION_METHOD_HEADER, 'https://example.com/api/v6/users.json?a=b+c'],
+            'query' => [ApiCommunicator::AUTHENTICATION_METHOD_QUERY, 'https://example.com/api/v6/users.json?a=b+c&accessToken=to%2Bk%2Fen%3D'],
+        ];
     }
 
     public function testPostIsNotRetriedOnServerError(): void
@@ -1537,7 +1661,8 @@ class ApiCommunicatorTest extends TestCase
         // Guzzle 7 reports timeouts as ConnectException as well, so the cURL error number decides
         GuzzleExceptions::requireGuzzle7($this);
         $history = [];
-        $error = new ConnectException('cURL error', new Request('POST', '/'), null, $errno === null ? [] : ['errno' => $errno]);
+        // Built from the request the client sent, as Guzzle does
+        $error = fn (RequestInterface $request) => new ConnectException('cURL error', $request, null, $errno === null ? [] : ['errno' => $errno]);
         $communicator = new ApiCommunicator('https://example.com', 'token');
         $communicator->setHttpClient($this->createMockClient([$error, $this->okResponse()], $history));
         $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
@@ -1572,7 +1697,10 @@ class ApiCommunicatorTest extends TestCase
         GuzzleExceptions::requireGuzzle8($this);
         $history = [];
         $communicator = new ApiCommunicator('https://example.com', 'token');
-        $communicator->setHttpClient($this->createMockClient([new $class('failure', new Request('POST', '/')), $this->okResponse()], $history));
+        $communicator->setHttpClient($this->createMockClient([
+            fn (RequestInterface $request) => new $class('failure', $request),
+            $this->okResponse(),
+        ], $history));
         $communicator->setRetryConfig(new RetryConfig(baseDelayMs: 0));
 
         try {

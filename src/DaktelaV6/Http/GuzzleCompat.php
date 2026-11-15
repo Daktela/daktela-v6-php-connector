@@ -96,14 +96,15 @@ final class GuzzleCompat
     }
 
     /**
-     * Checks whether a network failure happened before the request was sent to the server, so that repeating
-     * it cannot duplicate a server-side operation. Guzzle 7 reports timeouts as ConnectException as well, so the
-     * cURL error number decides; Guzzle 8 throws ConnectException only when the connection could not be
-     * established (DNS resolution, TCP connect, proxy CONNECT, or TLS handshake).
+     * Checks whether a network failure means that the connection for the failed transfer could not be established,
+     * so that the transfer was not sent. The transfer may be a redirect hop rather than the request the connector
+     * sent. Guzzle 7 reports timeouts as ConnectException as well, so the cURL error number decides; Guzzle 8
+     * throws ConnectException only when the connection could not be established (DNS resolution, TCP connect,
+     * proxy CONNECT, or TLS handshake).
      * @param \Throwable $ex exception raised by the HTTP client
-     * @return bool true when the request was not sent
+     * @return bool true when the failed transfer was not sent
      */
-    public static function failedBeforeSend(\Throwable $ex): bool
+    public static function failedToConnect(\Throwable $ex): bool
     {
         if (!$ex instanceof ConnectException) {
             return false;

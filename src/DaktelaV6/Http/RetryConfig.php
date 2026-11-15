@@ -21,7 +21,8 @@ class RetryConfig
      * @param bool $retryNonIdempotentRequests Whether POST requests may be retried after timeouts and
      *     retryable status codes. A retry may then repeat an operation the server already performed
      *     (e.g. create a duplicate record). POST requests are always retried when the connection
-     *     could not be established, because the request was never sent.
+     *     for the request itself could not be established, because the request was never sent; a
+     *     connection failure on a redirect target does not count.
      */
     public function __construct(
         private int $maxRetries = 3,

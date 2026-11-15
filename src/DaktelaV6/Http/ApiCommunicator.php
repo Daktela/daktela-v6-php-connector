@@ -531,7 +531,7 @@ class ApiCommunicator
                 // idempotent requests (or explicitly allowed ones) are repeated then.
                 if ($this->retryConfig === null
                     || !$this->retryConfig->shouldRetryOnConnectionError()
-                    || (!$canRetryAfterSend && !GuzzleCompat::failedBeforeSend($ex))
+                    || (!$canRetryAfterSend && !self::failedBeforeSend($ex, $request))
                 ) {
                     throw $exception;
                 }
@@ -598,6 +598,30 @@ class ApiCommunicator
             throw $this->wrapException($lastException, 'Max retries exceeded: ');
         }
         throw new RequestException('Max retries exceeded: Unknown error');
+    }
+
+    /**
+     * Checks whether a network failure happened before the request was sent to the server, so that repeating it
+     * cannot duplicate a server-side operation. A redirect hop that could not connect does not count: the server
+     * received the request it redirected, e.g. a POST it answered with 303 See Other after creating a record.
+     * @param Throwable $ex network exception raised by the HTTP client
+     * @param RequestInterface $request request the connector sent
+     * @return bool true when the request was not sent
+     */
+    private static function failedBeforeSend(Throwable $ex, RequestInterface $request): bool
+    {
+        if (!$ex instanceof NetworkExceptionInterface || !GuzzleCompat::failedToConnect($ex)) {
+            return false;
+        }
+        // A redirect hop has another method or URI. The HTTP client resolves the URI against its base URI, so only
+        // the path and the query are compared. A redirect that keeps the method and leads to the same path and
+        // query on another origin (307 or 308, or 301 and 302 with strict redirects) passes: the connector assumes
+        // that a server redirecting a request to the same resource elsewhere did not process it.
+        $failed = $ex->getRequest();
+
+        return $failed->getMethod() === $request->getMethod()
+            && $failed->getUri()->getPath() === $request->getUri()->getPath()
+            && $failed->getUri()->getQuery() === $request->getUri()->getQuery();
     }
 
     /**

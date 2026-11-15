@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file. The project fol
 
 ## [Unreleased]
 
+## [2.9.1] - 2026-11-15
+
 ### Security
 
 - Redacted the password of a login session from the exception, its stored response body and API errors, and log entries when the server echoes the password in an error response to the login. Other responses are not redacted for the password, as a short password would mangle their text.
@@ -171,7 +173,8 @@ Public methods only gained optional parameters, and `ARequest::getResponse()` wi
 
 No public method signatures were changed in this release. The dependency minimums in the Security section are the only compatibility-sensitive upgrade requirement.
 
-[Unreleased]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.9.0...HEAD
+[Unreleased]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.9.1...HEAD
+[2.9.1]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.9.0...2.9.1
 [2.9.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.8.0...2.9.0
 [2.8.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.7.1...2.8.0
 [2.7.1]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.7.0...2.7.1

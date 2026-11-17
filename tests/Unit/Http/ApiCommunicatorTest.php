@@ -6,6 +6,7 @@ namespace Daktela\Tests\Unit\Http;
 
 use Daktela\DaktelaV6\Exception\NotFoundException;
 use Daktela\DaktelaV6\Exception\RateLimitException;
+use Daktela\DaktelaV6\Exception\InvalidRequestException;
 use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Http\ApiCommunicator;
 use Daktela\DaktelaV6\Http\RateLimitConfig;
@@ -35,9 +36,6 @@ class ApiCommunicatorTest extends TestCase
     private function getPrivateProperty(object $object, string $name): mixed
     {
         $property = new \ReflectionProperty($object, $name);
-        if (PHP_VERSION_ID < 80100) {
-            $property->setAccessible(true);
-        }
         return $property->getValue($object);
     }
 
@@ -165,10 +163,7 @@ class ApiCommunicatorTest extends TestCase
         $communicator = new ApiCommunicator('example.com/', 'token');
         $communicator->setRequestTimeout(12.5);
         $communicator->setVerifySsl(false);
-        $method = new \ReflectionMethod($communicator, 'createDefaultClient');
-        if (PHP_VERSION_ID < 80100) {
-            $method->setAccessible(true);
-        }
+        $method = new \ReflectionMethod($communicator, 'defaultClient');
 
         /** @var Client $client */
         $client = $method->invoke($communicator);
@@ -176,6 +171,19 @@ class ApiCommunicatorTest extends TestCase
         $this->assertSame('https://example.com', (string)$client->getConfig('base_uri'));
         $this->assertSame(12.5, $client->getConfig('timeout'));
         $this->assertFalse($client->getConfig('verify'));
+    }
+
+    public function testDefaultAuthenticationIsBearerHeader(): void
+    {
+        $history = [];
+        $communicator = new ApiCommunicator('https://example.com', 'secret-token');
+        $communicator->setHttpClient($this->createMockClient([$this->okResponse()], $history));
+
+        $communicator->sendRequest('GET', 'Users');
+
+        $request = $history[0]['request'];
+        $this->assertSame('Bearer secret-token', $request->getHeaderLine('Authorization'));
+        $this->assertFalse($request->hasHeader('X-AUTH-TOKEN'));
     }
 
     public function testSetAuthenticationMethodHeader(): void
@@ -213,7 +221,7 @@ class ApiCommunicatorTest extends TestCase
 
     public function testSetAuthenticationMethodInvalid(): void
     {
-        $this->expectException(RequestException::class);
+        $this->expectException(InvalidRequestException::class);
         $this->expectExceptionMessage('Invalid authentication method');
 
         $communicator = new ApiCommunicator('https://example.com', 'token');
@@ -487,6 +495,7 @@ class ApiCommunicatorTest extends TestCase
         ], $history);
 
         $communicator = new ApiCommunicator('https://example.com', 'secret-token');
+        $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_HEADER);
         $communicator->setUserAgentSuffix('Example/1.0');
         $communicator->setHttpClient($mockClient);
         $communicator->sendRequest('POST', 'Users', ['take' => 5], ['name' => 'Alice']);
@@ -1397,6 +1406,42 @@ class ApiCommunicatorTest extends TestCase
         $this->assertFalse($requests[1]->hasHeader('X-AUTH-TOKEN'));
     }
 
+    public function testBearerTokenIsNotSentAfterAnUpgradeFromHttpToHttps(): void
+    {
+        // Guzzle removes the Authorization header whenever the scheme, host, or port changes
+        $communicator = new ApiCommunicator('http://example.com', 'SECRET');
+        $requests = [];
+        $this->useDefaultClientWithMockHandler($communicator, [
+            new GuzzleResponse(302, ['Location' => 'https://example.com/api/v6/users.json']),
+            $this->okResponse(),
+        ], $requests);
+        $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_BEARER);
+
+        $communicator->sendRequest('GET', 'Users');
+
+        $this->assertCount(2, $requests);
+        $this->assertSame('Bearer SECRET', $requests[0]->getHeaderLine('Authorization'));
+        $this->assertFalse($requests[1]->hasHeader('Authorization'));
+    }
+
+    public function testInvalidHeaderValueAndPayloadAreInvalidRequests(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([]));
+        $communicator->setUserAgentSuffix("App\r\n1.0");
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected InvalidRequestException');
+        } catch (InvalidRequestException $ex) {
+            $this->assertNull($ex->getHttpStatus());
+        }
+
+        $communicator->setUserAgentSuffix(null);
+        $this->expectException(InvalidRequestException::class);
+        $this->expectExceptionMessage('The request payload cannot be encoded as JSON');
+        $communicator->sendRequest('POST', 'Users', [], ['title' => "\xB1"]);
+    }
+
     public static function crossOriginRedirects(): array
     {
         return [
@@ -1650,10 +1695,7 @@ class ApiCommunicatorTest extends TestCase
      */
     private function useDefaultClientWithMockHandler(ApiCommunicator $communicator, array $responses, array &$requests): void
     {
-        $method = new \ReflectionMethod($communicator, 'createDefaultClient');
-        if (PHP_VERSION_ID < 80100) {
-            $method->setAccessible(true);
-        }
+        $method = new \ReflectionMethod($communicator, 'defaultClient');
         /** @var Client $client */
         $client = $method->invoke($communicator);
         $mock = new MockHandler($responses);
@@ -1661,6 +1703,8 @@ class ApiCommunicatorTest extends TestCase
             $requests[] = $request;
             return $mock($request, $options);
         });
+        // The redirect tests cover the X-AUTH-TOKEN header, which Guzzle does not remove itself
+        $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_HEADER);
         $communicator->setHttpClient($client);
     }
 

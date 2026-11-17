@@ -4,16 +4,16 @@ Daktela V6 PHP Connector is a library that enables your PHP application to conne
 
 ## Installation
 
-The connector requires PHP 8.0 or newer, the `mbstring` extension, and Guzzle 7 (7.15.2 or newer, with PSR-7 2.13 or newer) or Guzzle 8 (8.0.1 or newer, with PSR-7 3). Composer installs the Guzzle version that fits the other dependencies of your project. The recommended way to install it is through Composer:
+The connector requires PHP 8.1 or newer, the `mbstring` extension, and Guzzle 7 (7.15.2 or newer, with PSR-7 2.13 or newer) or Guzzle 8 (8.0.1 or newer, with PSR-7 3). Composer installs the Guzzle version that fits the other dependencies of your project. The recommended way to install it is through Composer:
 
 ```bash
-composer require daktela/daktela-v6-php-connector:^2.10
+composer require daktela/daktela-v6-php-connector:^3.0
 ```
 
 When upgrading an existing installation, Composer may need permission to update transitive dependencies:
 
 ```bash
-composer require daktela/daktela-v6-php-connector:^2.10 --with-all-dependencies
+composer require daktela/daktela-v6-php-connector:^3.0 --with-all-dependencies
 ```
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes and upgrade requirements.
@@ -40,21 +40,7 @@ $client->getApiCommunicator()->setRequestTimeout(30.0); // 30 seconds
 
 ## Usage
 
-There are two ways you can use the Daktela V6 PHP Connector:
-
-1. Instantiate the connector directly when using one set of credentials.
-2. Use the static instance accessor when working with multiple instance URL and access-token pairs.
-
-Clients with the same instance URL and access token share the same `ApiCommunicator`, including its authentication method, timeout, SSL verification, User-Agent suffix, logger, custom HTTP client, retry, and rate-limit settings. `Client::getInstance()` also returns the same `Client` object for the same pair. A setting changed through one of them applies to all code that uses the pair. Configure those clients consistently, or give a client its own transport:
-
-```php
-use Daktela\DaktelaV6\Client;
-use Daktela\DaktelaV6\Http\ApiCommunicator;
-
-$client = new Client($instance, $accessToken, new ApiCommunicator($instance, $accessToken));
-```
-
-### 1. Using instance of the connector
+Create a client with the URL of the instance and an access token, and execute requests with it:
 
 ```php
 use Daktela\DaktelaV6\Client;
@@ -69,21 +55,19 @@ $request = RequestFactory::buildReadRequest("Users")
 $response = $client->execute($request);
 ```
 
-### 2. Using static access methods
+Every client has an `ApiCommunicator` of its own, which holds its transport settings: authentication method, timeout, SSL verification, User-Agent suffix, logger, custom HTTP client, retry, and rate-limit settings. To share one transport between clients, or to configure it before the client is created, pass it to the constructor:
 
 ```php
 use Daktela\DaktelaV6\Client;
-use Daktela\DaktelaV6\RequestFactory;
+use Daktela\DaktelaV6\Http\ApiCommunicator;
 
-$instance = "https://mydaktela.daktela.com/";
-$accessToken = "your-access-token";
+$communicator = new ApiCommunicator($instance, $accessToken);
+$communicator->setRequestTimeout(10.0);
 
-$client = Client::getInstance($instance, $accessToken);
-$request = RequestFactory::buildReadRequest("Users")
-    ->addFilter("username", "eq", "admin");
-$response = $client->execute($request);
+$client = new Client($instance, $accessToken, $communicator);
 ```
 
+`Client::getInstance()` and `ApiCommunicator::getInstance()` are deprecated. They return one shared object per instance URL and access token, so a setting changed by one caller applies to all of them, and the object stays in memory with its token until the process ends. Create the client once and pass it to the code that needs it.
 ## Operations
 
 The allowed operations serve for CRUD manipulation with objects. Each operation uses the builder pattern and corresponds
@@ -241,6 +225,8 @@ $httpStatus =   $response->getHttpStatus();
 
 Transport failures and, with Guzzle's default `http_errors` setting, non-retryable HTTP 4xx/5xx responses are wrapped in `Daktela\DaktelaV6\Exception\RequestException`. Other exceptions of the HTTP client, for example from a custom client, are wrapped in `RequestException` as well: a Guzzle request or network exception is chained as a copy without the access token, and any other exception is not chained, because its own previous exceptions may carry the token. HTTP 429 responses use the more specific `RateLimitException`, which extends `RequestException` and returns 429 from `getHttpStatus()`.
 
+A request that is not valid, such as a model or object name that would address another endpoint, a relation without its object, a page size below 1, or an instance URL that cannot be parsed, throws `InvalidRequestException` before anything is sent. It extends `RequestException`.
+
 HTTP 404 responses throw `NotFoundException`, which also extends `RequestException`. For HTTP errors, the exception exposes the response details:
 
 ```php
@@ -338,19 +324,19 @@ $client = new Client($instance, '', $communicator);
 
 The connector supports three ways of passing the access token to the Daktela V6 API. It sends the token in exactly one of them.
 
-### 1. X-AUTH-TOKEN Header (Default)
+### 1. Authorization: Bearer Header (Default)
 
-By default, the access token is sent in the `X-AUTH-TOKEN` HTTP header. Every Daktela V6 version accepts it, so it remains the default. The Daktela API documentation lists it as a legacy header in favour of `Authorization: Bearer`, but it is still supported.
+By default, the access token is sent in the standard `Authorization: Bearer <token>` header, which the Daktela API documentation recommends. It requires Daktela 31.37.0, 32.36.0, 33.14.0, or later. Older versions do not read this header: API endpoints answer HTTP 401, and the health check reports the token as not accepted. Use the `X-AUTH-TOKEN` header for them.
 
 ```php
 use Daktela\DaktelaV6\Client;
 $client = new Client($instance, $accessToken);
-// Token is automatically sent via X-AUTH-TOKEN header
+// Token is automatically sent via the Authorization: Bearer header
 ```
 
-### 2. Authorization: Bearer Header
+### 2. X-AUTH-TOKEN Header (Legacy)
 
-The standard `Authorization: Bearer <token>` header is the method the Daktela API documentation recommends. It requires Daktela 31.37.0, 32.36.0, 33.14.0, or later. Older versions do not read this header: API endpoints answer HTTP 401, and the health check reports the token as not accepted.
+The access token can be sent in the proprietary `X-AUTH-TOKEN` header, which every Daktela V6 version accepts. The Daktela API documentation lists it as legacy, but it is still supported. Use it for Daktela versions older than 31.37.0, 32.36.0, or 33.14.0.
 
 ```php
 use Daktela\DaktelaV6\Client;
@@ -358,13 +344,13 @@ use Daktela\DaktelaV6\Http\ApiCommunicator;
 
 $client = new Client($instance, $accessToken);
 $client->getApiCommunicator()->setAuthenticationMethod(
-    ApiCommunicator::AUTHENTICATION_METHOD_BEARER
+    ApiCommunicator::AUTHENTICATION_METHOD_HEADER
 );
 ```
 
-### 3. Query Parameter Authentication
+### 3. Query Parameter Authentication (Deprecated)
 
-Alternatively, you can send the access token as a query parameter (`accessToken`). This method may be useful for compatibility with certain proxy configurations or firewall rules.
+This method is deprecated: the token becomes part of the request URL, which web servers and proxies write to their logs. Alternatively, you can send the access token as a query parameter (`accessToken`). This method may be useful for compatibility with certain proxy configurations or firewall rules.
 
 ```php
 use Daktela\DaktelaV6\Client;
@@ -380,11 +366,11 @@ To switch back to the default header:
 
 ```php
 $client->getApiCommunicator()->setAuthenticationMethod(
-    ApiCommunicator::AUTHENTICATION_METHOD_HEADER
+    ApiCommunicator::AUTHENTICATION_METHOD_BEARER
 );
 ```
 
-**Security Note:** Use one of the header methods in production. They keep the access token out of server logs, browser history, and other places where URLs are typically recorded. The default HTTP client does not send the token to a redirect target outside the instance (another host, another port, or plain HTTP from an HTTPS instance; an upgrade from HTTP to HTTPS on the same host is allowed), and keeps it off for the rest of the redirect chain once a redirect has left the instance. If you set a custom HTTP client, configure its redirect handling yourself.
+**Security Note:** Use one of the header methods in production. They keep the access token out of server logs, browser history, and other places where URLs are typically recorded. The default HTTP client does not send the token to a redirect target outside the instance (another host, another port, or plain HTTP from an HTTPS instance). After a redirect from `http://` to `https://` on the same host, the `X-AUTH-TOKEN` header is still sent, but the `Authorization: Bearer` header is not, because Guzzle removes it whenever the scheme changes: use an `https://` instance URL, and keeps it off for the rest of the redirect chain once a redirect has left the instance. If you set a custom HTTP client, configure its redirect handling yourself.
 
 ## Advanced Configuration
 
@@ -570,7 +556,7 @@ if ($iterator->hasStoppedOnError()) {
 }
 ```
 
-Set `stopOnError: false` to skip an error page and continue at the next offset. As with reading all records, only an HTTP 2xx response with an `error` member is an error page; an HTTP 4xx or 5xx response throws a `RequestException` out of the loop, and `hasStoppedOnError()` stays `false`. The page size must be at least 1; `iterate()` throws an `InvalidArgumentException` otherwise. Error pages are skipped only while the API-reported total shows that more records follow; otherwise the iteration stops and the error response is available as above. For item iteration, a `maxItems` value of zero returns no items and sends no request; `pages()` is independent of that item limit.
+Set `stopOnError: false` to skip an error page and continue at the next offset. As with reading all records, only an HTTP 2xx response with an `error` member is an error page; an HTTP 4xx or 5xx response throws a `RequestException` out of the loop, and `hasStoppedOnError()` stays `false`. The page size must be at least 1; `iterate()` throws an `InvalidRequestException` otherwise. Error pages are skipped only while the API-reported total shows that more records follow; otherwise the iteration stops and the error response is available as above. For item iteration, a `maxItems` value of zero returns no items and sends no request; `pages()` is independent of that item limit.
 
 Iterator helper methods start a new traversal each time. For example, calling `first()` and then `toArray()` performs separate API reads.
 
@@ -610,7 +596,7 @@ docker run --rm -v "$PWD:/app" -w /app --entrypoint php composer:2 \
 The full suite also contains live API integration tests, which are skipped unless their environment variables are set:
 
 - The request tests need `INSTANCE`, `ACCESS_TOKEN`, and `RECORD_TYPE`.
-- The health check tests need `INSTANCE`. The static token tests also need `ACCESS_TOKEN`, and the Bearer test requires Daktela 31.37.0, 32.36.0, 33.14.0, or later.
+- The health check tests need `INSTANCE`. The static token tests also need `ACCESS_TOKEN`, and all tests with a static token use the default `Authorization: Bearer` header, which requires Daktela 31.37.0, 32.36.0, 33.14.0, or later.
 - The login tests need `INSTANCE`, `LOGIN_USERNAME`, and `LOGIN_PASSWORD` of an account without two-factor authentication.
 
 `composer check` runs `composer validate`, the coding standard (PSR-12, `phpcs.xml.dist`), PHPStan, and the tests. CI runs the same on every supported PHP and Guzzle version, and also requires 90% line coverage. Run it in the same container:

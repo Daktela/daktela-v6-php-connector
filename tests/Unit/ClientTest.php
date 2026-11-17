@@ -7,6 +7,7 @@ namespace Daktela\Tests\Unit;
 use Daktela\DaktelaV6\Auth\InMemoryTokenStore;
 use Daktela\DaktelaV6\Auth\TokenSet;
 use Daktela\DaktelaV6\Client;
+use Daktela\DaktelaV6\Exception\InvalidRequestException;
 use Daktela\DaktelaV6\Exception\NotFoundException;
 use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Exception\UnknownRequestTypeException;
@@ -33,9 +34,6 @@ class ClientTest extends TestCase
     {
         $client = new Client('https://test-' . uniqid() . '.example.com', 'token');
         $property = new \ReflectionProperty(Client::class, 'apiCommunicator');
-        if (PHP_VERSION_ID < 80100) {
-            $property->setAccessible(true);
-        }
         $property->setValue($client, $communicator);
         return $client;
     }
@@ -43,9 +41,6 @@ class ClientTest extends TestCase
     private function getPrivateProperty(object $object, string $name): mixed
     {
         $property = new \ReflectionProperty($object, $name);
-        if (PHP_VERSION_ID < 80100) {
-            $property->setAccessible(true);
-        }
         return $property->getValue($object);
     }
 
@@ -69,25 +64,27 @@ class ClientTest extends TestCase
         );
     }
 
+    public function testEveryClientHasATransportOfItsOwn(): void
+    {
+        $first = new Client('https://example.com', 'token');
+        $second = new Client('https://example.com', 'token');
+        $first->getApiCommunicator()->setRequestTimeout(30.0);
+
+        $this->assertNotSame($first->getApiCommunicator(), $second->getApiCommunicator());
+        $this->assertSame(2.0, $this->getPrivateProperty($second->getApiCommunicator(), 'requestTimeout'));
+    }
+
+    public function testInvalidRequestIsARequestException(): void
+    {
+        $this->assertInstanceOf(RequestException::class, new InvalidRequestException('Invalid model: x'));
+    }
+
     public function testGetApiCommunicator(): void
     {
         $communicator = $this->createCommunicator();
         $client = $this->createClient($communicator);
 
         $this->assertSame($communicator, $client->getApiCommunicator());
-    }
-
-    public function testExecuteReturnsManuallyCachedResponseWithoutSendingRequest(): void
-    {
-        $communicator = $this->createCommunicator();
-        $communicator->expects($this->never())->method('sendRequest');
-        $client = $this->createClient($communicator);
-        $request = new ReadRequest('Users');
-        $cached = new Response([['id' => 1]], 1, [], 200);
-        $request->setResponse($cached);
-        $request->setExecuted(true);
-
-        $this->assertSame($cached, $client->execute($request));
     }
 
     public function testExecuteRejectsUnknownRequestClass(): void
@@ -370,7 +367,7 @@ class ClientTest extends TestCase
         $stack->push(\GuzzleHttp\Middleware::history($history));
         $communicator->setHttpClient(new \GuzzleHttp\Client(['handler' => $stack]));
         $client->execute(new ReadRequest('Users'));
-        $this->assertSame($accessToken, $history[0]['request']->getHeaderLine('X-AUTH-TOKEN'));
+        $this->assertSame('Bearer ' . $accessToken, $history[0]['request']->getHeaderLine('Authorization'));
     }
 
     public function testPingDelegatesToCommunicator(): void
@@ -428,7 +425,7 @@ class ClientTest extends TestCase
         $communicator->expects($this->never())->method('sendRequest');
         $client = $this->createClient($communicator);
 
-        $this->expectException(RequestException::class);
+        $this->expectException(InvalidRequestException::class);
         $client->execute((new DeleteRequest('Contacts'))->setObjectName($objectName));
     }
 
@@ -443,7 +440,7 @@ class ClientTest extends TestCase
         $communicator->expects($this->never())->method('sendRequest');
         $client = $this->createClient($communicator);
 
-        $this->expectException(RequestException::class);
+        $this->expectException(InvalidRequestException::class);
         $client->execute((new ReadRequest('Tickets'))->setObjectName('1')->setRelation('..'));
     }
 
@@ -511,25 +508,13 @@ class ClientTest extends TestCase
         $this->assertCount(3, $client->execute($request)->getData());
     }
 
-    public function testExecuteSendsRequestWhenExecutedFlagHasNoResponse(): void
-    {
-        $communicator = $this->createCommunicator();
-        $expected = new Response([], 0, [], 200);
-        $communicator->expects($this->once())->method('sendRequest')->willReturn($expected);
-        $client = $this->createClient($communicator);
-        $request = new ReadRequest('Users');
-        $request->setExecuted(true);
-
-        $this->assertSame($expected, $client->execute($request));
-    }
-
     public function testEmptyObjectNameWithRelationIsRejected(): void
     {
         $communicator = $this->createCommunicator();
         $communicator->expects($this->never())->method('sendRequest');
         $client = $this->createClient($communicator);
 
-        $this->expectException(RequestException::class);
+        $this->expectException(InvalidRequestException::class);
         $client->execute((new ReadRequest('Tickets'))->setObjectName('')->setRelation('activities'));
     }
 
@@ -542,7 +527,7 @@ class ClientTest extends TestCase
         $communicator->expects($this->never())->method('sendRequest');
         $client = $this->createClient($communicator);
 
-        $this->expectException(RequestException::class);
+        $this->expectException(InvalidRequestException::class);
         $client->execute($request);
     }
 
@@ -595,7 +580,7 @@ class ClientTest extends TestCase
         $communicator->expects($this->never())->method('sendRequest');
         $request = (new ReadRequest('Users'))->setRequestType(ReadRequest::TYPE_ALL)->setTake($take);
 
-        $this->expectException(RequestException::class);
+        $this->expectException(InvalidRequestException::class);
         $this->expectExceptionMessage('The take of a request reading all records must be at least 1');
 
         $this->createClient($communicator)->execute($request);
@@ -615,7 +600,7 @@ class ClientTest extends TestCase
         $communicator->expects($this->never())->method('sendRequest');
         $request = (new ReadRequest('Tickets'))->setRequestType($requestType)->setRelation('activities');
 
-        $this->expectException(RequestException::class);
+        $this->expectException(InvalidRequestException::class);
         $this->expectExceptionMessage('A relation needs an object name');
 
         $this->createClient($communicator)->execute($request);
@@ -634,7 +619,7 @@ class ClientTest extends TestCase
         $communicator = $this->createCommunicator();
         $communicator->expects($this->never())->method('sendRequest');
 
-        $this->expectException(RequestException::class);
+        $this->expectException(InvalidRequestException::class);
         $this->expectExceptionMessage('Invalid model');
 
         $this->createClient($communicator)->execute(new ReadRequest($model));

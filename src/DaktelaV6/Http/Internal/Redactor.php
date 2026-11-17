@@ -33,7 +33,11 @@ final class Redactor
      */
     public function responseBody(string $rawBody): string
     {
-        return $this->credentials->loginInProgress ? $this->redactLoginErrorBody($rawBody) : $this->redact($rawBody);
+        // The raw body is moved out of the parameters, which the trace of an exception created below records
+        $raw = $rawBody;
+        $rawBody = '';
+
+        return $this->credentials->loginInProgress ? $this->redactLoginErrorBody($raw) : $this->redact($raw);
     }
 
     /**

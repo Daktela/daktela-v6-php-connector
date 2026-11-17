@@ -59,6 +59,32 @@ class ApiCommunicatorLoginTest extends TestCase
         return $communicator;
     }
 
+    public function testLoginOnACloneDoesNotChangeTheSessionOfTheOriginal(): void
+    {
+        $first = self::tokens('first');
+        $second = self::tokens('second');
+        $communicator = $this->communicator([
+            self::tokenResponse($first),
+            self::tokenResponse($second),
+            new GuzzleResponse(200, [], '{"error":[],"result":[]}'),
+            new GuzzleResponse(200, [], '{"error":[],"result":[]}'),
+            new GuzzleResponse(200, [], '{"error":[],"result":[]}'),
+        ]);
+        $communicator->login('api', 'password');
+        $sharing = clone $communicator;
+        $other = clone $communicator;
+        $other->login('other', 'password2');
+
+        $communicator->sendRequest('GET', 'Users');
+        $sharing->sendRequest('GET', 'Users');
+        $other->sendRequest('GET', 'Users');
+
+        $this->assertSame($first[0], $this->history[2]['request']->getHeaderLine('X-AUTH-TOKEN'));
+        // A clone keeps the session of the original until it logs in itself
+        $this->assertSame($first[0], $this->history[3]['request']->getHeaderLine('X-AUTH-TOKEN'));
+        $this->assertSame($second[0], $this->history[4]['request']->getHeaderLine('X-AUTH-TOKEN'));
+    }
+
     private static function tokens(string $name, int $accessTtl = 3600, int $refreshTtl = 86400): array
     {
         return [TokenSetTest::jwt(time() + $accessTtl) . $name, TokenSetTest::jwt(time() + $refreshTtl) . 'R' . $name];

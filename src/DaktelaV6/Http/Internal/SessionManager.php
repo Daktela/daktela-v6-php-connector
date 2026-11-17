@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Daktela\DaktelaV6\Http\Internal;
 
 use Daktela\DaktelaV6\Auth\TokenSet;
+use Daktela\DaktelaV6\Exception\InvalidRequestException;
 use Daktela\DaktelaV6\Exception\NotFoundException;
 use Daktela\DaktelaV6\Exception\RateLimitException;
 use Daktela\DaktelaV6\Exception\RequestException;
@@ -170,6 +171,9 @@ final class SessionManager
             $response = ($this->send)($apiEndpoint);
         } catch (RateLimitException $ex) {
             throw new RateLimitException($ex->getRetryAfterSeconds());
+        } catch (InvalidRequestException $ex) {
+            // Rejected before it was sent; its message is a text of the connector or was redacted where it was built
+            throw new InvalidRequestException($ex->getMessage());
         } catch (RequestException $ex) {
             $status = $ex->getHttpStatus();
             // A successful response that could not be parsed may contain the new tokens

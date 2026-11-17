@@ -67,7 +67,7 @@ final class Transport
         $rateLimitRetryCount = $this->rateLimitConfig?->shouldAutoRetry() ? max(1, $retryCount) : 0;
         $maxAttempts = 1 + max($retryCount, $rateLimitRetryCount);
         $applyRetryDelay = false;
-        // buildRequest() upper-cases the method
+        // RequestBuilder::build() upper-cases the method
         $canRetryAfterSend = in_array($request->getMethod(), self::IDEMPOTENT_METHODS, true)
             || ($this->retryConfig?->shouldRetryNonIdempotentRequests() ?? false);
 

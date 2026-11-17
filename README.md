@@ -370,7 +370,7 @@ $client->getApiCommunicator()->setAuthenticationMethod(
 );
 ```
 
-**Security Note:** Use one of the header methods in production. They keep the access token out of server logs, browser history, and other places where URLs are typically recorded. The default HTTP client does not send the token to a redirect target outside the instance (another host, another port, or plain HTTP from an HTTPS instance; an upgrade from HTTP to HTTPS on the same host is allowed), and keeps it off for the rest of the redirect chain once a redirect has left the instance. If you set a custom HTTP client, configure its redirect handling yourself.
+**Security Note:** Use one of the header methods in production. They keep the access token out of server logs, browser history, and other places where URLs are typically recorded. The default HTTP client does not send the token to a redirect target outside the instance (another host, another port, or plain HTTP from an HTTPS instance). After a redirect from `http://` to `https://` on the same host, the `X-AUTH-TOKEN` header is still sent, but the `Authorization: Bearer` header is not, because Guzzle removes it whenever the scheme changes: use an `https://` instance URL, and keeps it off for the rest of the redirect chain once a redirect has left the instance. If you set a custom HTTP client, configure its redirect handling yourself.
 
 ## Advanced Configuration
 
@@ -556,7 +556,7 @@ if ($iterator->hasStoppedOnError()) {
 }
 ```
 
-Set `stopOnError: false` to skip an error page and continue at the next offset. As with reading all records, only an HTTP 2xx response with an `error` member is an error page; an HTTP 4xx or 5xx response throws a `RequestException` out of the loop, and `hasStoppedOnError()` stays `false`. The page size must be at least 1; `iterate()` throws an `InvalidArgumentException` otherwise. Error pages are skipped only while the API-reported total shows that more records follow; otherwise the iteration stops and the error response is available as above. For item iteration, a `maxItems` value of zero returns no items and sends no request; `pages()` is independent of that item limit.
+Set `stopOnError: false` to skip an error page and continue at the next offset. As with reading all records, only an HTTP 2xx response with an `error` member is an error page; an HTTP 4xx or 5xx response throws a `RequestException` out of the loop, and `hasStoppedOnError()` stays `false`. The page size must be at least 1; `iterate()` throws an `InvalidRequestException` otherwise. Error pages are skipped only while the API-reported total shows that more records follow; otherwise the iteration stops and the error response is available as above. For item iteration, a `maxItems` value of zero returns no items and sends no request; `pages()` is independent of that item limit.
 
 Iterator helper methods start a new traversal each time. For example, calling `first()` and then `toArray()` performs separate API reads.
 
@@ -596,7 +596,7 @@ docker run --rm -v "$PWD:/app" -w /app --entrypoint php composer:2 \
 The full suite also contains live API integration tests, which are skipped unless their environment variables are set:
 
 - The request tests need `INSTANCE`, `ACCESS_TOKEN`, and `RECORD_TYPE`.
-- The health check tests need `INSTANCE`. The static token tests also need `ACCESS_TOKEN`, and the Bearer test requires Daktela 31.37.0, 32.36.0, 33.14.0, or later.
+- The health check tests need `INSTANCE`. The static token tests also need `ACCESS_TOKEN`, and all tests with a static token use the default `Authorization: Bearer` header, which requires Daktela 31.37.0, 32.36.0, 33.14.0, or later.
 - The login tests need `INSTANCE`, `LOGIN_USERNAME`, and `LOGIN_PASSWORD` of an account without two-factor authentication.
 
 `composer check` runs `composer validate`, the coding standard (PSR-12, `phpcs.xml.dist`), PHPStan, and the tests. CI runs the same on every supported PHP and Guzzle version, and also requires 90% line coverage. Run it in the same container:

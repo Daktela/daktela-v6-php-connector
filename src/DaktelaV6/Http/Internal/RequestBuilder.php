@@ -99,7 +99,7 @@ final class RequestBuilder
             $request = new Request(strtoupper($method), $requestUri, $headers, $body);
         } catch (\InvalidArgumentException $ex) {
             // An invalid header value, e.g. an access token with a trailing newline, is quoted in the message
-            throw new RequestException($this->redactor->redact($ex->getMessage()));
+            throw new InvalidRequestException($this->redactor->redact($ex->getMessage()));
         }
         if ($request->getUri()->getHost() !== '' || $request->getUri()->getScheme() !== '') {
             // The request is a path the HTTP client resolves against the instance; one that names a host of its

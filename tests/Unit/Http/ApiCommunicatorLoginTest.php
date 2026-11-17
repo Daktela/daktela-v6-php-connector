@@ -9,6 +9,7 @@ use Daktela\DaktelaV6\Auth\TokenSet;
 use Daktela\DaktelaV6\Auth\TokenStore;
 use Daktela\DaktelaV6\Client as DaktelaClient;
 use Daktela\DaktelaV6\Exception\RateLimitException;
+use Daktela\DaktelaV6\Exception\InvalidRequestException;
 use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Http\ApiCommunicator;
 use Daktela\Tests\Support\ExposesTraces;
@@ -413,8 +414,8 @@ class ApiCommunicatorLoginTest extends TestCase
 
         try {
             $communicator->login('api', "pw-SECRET-\xB1", null);
-            $this->fail('Expected RequestException');
-        } catch (RequestException $ex) {
+            $this->fail('Expected InvalidRequestException');
+        } catch (InvalidRequestException $ex) {
             $this->assertStringStartsWith('The request payload cannot be encoded as JSON', $ex->getMessage());
             $this->assertStringNotContainsString('pw-SECRET', self::exposed($ex));
             $this->assertCount(0, $this->history);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Daktela\Tests\Unit\Http;
 
+use Daktela\DaktelaV6\Exception\InvalidRequestException;
 use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Http\ApiCommunicator;
 use Daktela\DaktelaV6\Http\Internal\Credentials;
@@ -111,8 +112,8 @@ class ApiCommunicatorHardeningTest extends TestCase
 
         try {
             $communicator->sendRequest('GET', 'Users');
-            $this->fail('A RequestException was expected');
-        } catch (RequestException $ex) {
+            $this->fail('An InvalidRequestException was expected');
+        } catch (InvalidRequestException $ex) {
             $this->assertSame('The instance URL is not a valid URL.', $ex->getMessage());
         }
 

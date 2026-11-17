@@ -425,7 +425,7 @@ class ClientTest extends TestCase
         $communicator->expects($this->never())->method('sendRequest');
         $client = $this->createClient($communicator);
 
-        $this->expectException(RequestException::class);
+        $this->expectException(InvalidRequestException::class);
         $client->execute((new DeleteRequest('Contacts'))->setObjectName($objectName));
     }
 
@@ -440,7 +440,7 @@ class ClientTest extends TestCase
         $communicator->expects($this->never())->method('sendRequest');
         $client = $this->createClient($communicator);
 
-        $this->expectException(RequestException::class);
+        $this->expectException(InvalidRequestException::class);
         $client->execute((new ReadRequest('Tickets'))->setObjectName('1')->setRelation('..'));
     }
 
@@ -514,7 +514,7 @@ class ClientTest extends TestCase
         $communicator->expects($this->never())->method('sendRequest');
         $client = $this->createClient($communicator);
 
-        $this->expectException(RequestException::class);
+        $this->expectException(InvalidRequestException::class);
         $client->execute((new ReadRequest('Tickets'))->setObjectName('')->setRelation('activities'));
     }
 
@@ -527,7 +527,7 @@ class ClientTest extends TestCase
         $communicator->expects($this->never())->method('sendRequest');
         $client = $this->createClient($communicator);
 
-        $this->expectException(RequestException::class);
+        $this->expectException(InvalidRequestException::class);
         $client->execute($request);
     }
 
@@ -580,7 +580,7 @@ class ClientTest extends TestCase
         $communicator->expects($this->never())->method('sendRequest');
         $request = (new ReadRequest('Users'))->setRequestType(ReadRequest::TYPE_ALL)->setTake($take);
 
-        $this->expectException(RequestException::class);
+        $this->expectException(InvalidRequestException::class);
         $this->expectExceptionMessage('The take of a request reading all records must be at least 1');
 
         $this->createClient($communicator)->execute($request);
@@ -600,7 +600,7 @@ class ClientTest extends TestCase
         $communicator->expects($this->never())->method('sendRequest');
         $request = (new ReadRequest('Tickets'))->setRequestType($requestType)->setRelation('activities');
 
-        $this->expectException(RequestException::class);
+        $this->expectException(InvalidRequestException::class);
         $this->expectExceptionMessage('A relation needs an object name');
 
         $this->createClient($communicator)->execute($request);

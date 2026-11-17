@@ -6,6 +6,7 @@ namespace Daktela\Tests\Unit\Http;
 
 use Daktela\DaktelaV6\Exception\NotFoundException;
 use Daktela\DaktelaV6\Exception\RateLimitException;
+use Daktela\DaktelaV6\Exception\InvalidRequestException;
 use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Http\ApiCommunicator;
 use Daktela\DaktelaV6\Http\RateLimitConfig;
@@ -220,7 +221,7 @@ class ApiCommunicatorTest extends TestCase
 
     public function testSetAuthenticationMethodInvalid(): void
     {
-        $this->expectException(RequestException::class);
+        $this->expectException(InvalidRequestException::class);
         $this->expectExceptionMessage('Invalid authentication method');
 
         $communicator = new ApiCommunicator('https://example.com', 'token');
@@ -1403,6 +1404,42 @@ class ApiCommunicatorTest extends TestCase
         $this->assertCount(2, $requests);
         $this->assertSame('SECRET', $requests[0]->getHeaderLine('X-AUTH-TOKEN'));
         $this->assertFalse($requests[1]->hasHeader('X-AUTH-TOKEN'));
+    }
+
+    public function testBearerTokenIsNotSentAfterAnUpgradeFromHttpToHttps(): void
+    {
+        // Guzzle removes the Authorization header whenever the scheme, host, or port changes
+        $communicator = new ApiCommunicator('http://example.com', 'SECRET');
+        $requests = [];
+        $this->useDefaultClientWithMockHandler($communicator, [
+            new GuzzleResponse(302, ['Location' => 'https://example.com/api/v6/users.json']),
+            $this->okResponse(),
+        ], $requests);
+        $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_BEARER);
+
+        $communicator->sendRequest('GET', 'Users');
+
+        $this->assertCount(2, $requests);
+        $this->assertSame('Bearer SECRET', $requests[0]->getHeaderLine('Authorization'));
+        $this->assertFalse($requests[1]->hasHeader('Authorization'));
+    }
+
+    public function testInvalidHeaderValueAndPayloadAreInvalidRequests(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $communicator->setHttpClient($this->createMockClient([]));
+        $communicator->setUserAgentSuffix("App\r\n1.0");
+        try {
+            $communicator->sendRequest('GET', 'Users');
+            $this->fail('Expected InvalidRequestException');
+        } catch (InvalidRequestException $ex) {
+            $this->assertNull($ex->getHttpStatus());
+        }
+
+        $communicator->setUserAgentSuffix(null);
+        $this->expectException(InvalidRequestException::class);
+        $this->expectExceptionMessage('The request payload cannot be encoded as JSON');
+        $communicator->sendRequest('POST', 'Users', [], ['title' => "\xB1"]);
     }
 
     public static function crossOriginRedirects(): array

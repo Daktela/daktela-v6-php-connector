@@ -170,6 +170,52 @@ class ApiCommunicatorHardeningTest extends TestCase
         ];
     }
 
+    /**
+     * @dataProvider instanceUrlsWithOnlySlashesBeforeTheApiNamespace
+     */
+    public function testSlashesBeforeTheApiNamespaceDoNotNameAnotherHost(string $baseUrl): void
+    {
+        $communicator = $this->communicator([new GuzzleResponse(200, [], '{"result":{"data":[],"total":0}}')], $baseUrl);
+        $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_BEARER);
+
+        $communicator->sendRequest('GET', 'Users');
+
+        $uri = $this->history[0]['request']->getUri();
+        $this->assertSame('', $uri->getHost());
+        $this->assertSame('/api/v6/users.json', $uri->getPath());
+    }
+
+    public function instanceUrlsWithOnlySlashesBeforeTheApiNamespace(): array
+    {
+        return [
+            'two slashes' => ['https://acme.example.com//api/v6'],
+            'trailing slash' => ['https://acme.example.com//api/v6/'],
+            'three slashes' => ['https://acme.example.com///api/v6'],
+            'upper case' => ['https://acme.example.com//API/V6'],
+            'no scheme' => ['acme.example.com//api/v6'],
+            'plain' => ['https://acme.example.com/api/v6'],
+            'only slashes' => ['https://acme.example.com//'],
+        ];
+    }
+
+    public function testNonJsonBodyOfARedirectedLoginIsLeftOut(): void
+    {
+        $password = 'P&ss<word>';
+        $communicator = $this->communicator(
+            [new GuzzleResponse(302, ['Location' => '/login'], '<p>Wrong password ' . htmlspecialchars($password) . '</p>')],
+            'https://example.com',
+            ''
+        );
+
+        try {
+            $communicator->login('api', $password);
+            $this->fail('A RequestException was expected');
+        } catch (RequestException $ex) {
+            $this->assertSame('', $ex->getResponseBody());
+            $this->assertStringNotContainsString(htmlspecialchars($password), self::exposed($ex));
+        }
+    }
+
     public function testLoginPayloadStaysOnTheInstanceWhenThePathStartsWithTwoSlashes(): void
     {
         $communicator = $this->communicator(
@@ -207,6 +253,88 @@ class ApiCommunicatorHardeningTest extends TestCase
         $third = self::invoke($communicator, 'defaultClient');
         $this->assertNotSame($second, $third);
         $this->assertFalse($third->getConfig('verify'));
+    }
+
+    public function testRequestsShareTheDefaultClient(): void
+    {
+        $logger = new class extends AbstractLogger {
+            public array $messages = [];
+
+            public function log($level, $message, array $context = []): void
+            {
+                $this->messages[] = (string)$message;
+            }
+        };
+        // Nothing listens on port 1, so both requests fail to connect
+        $communicator = new ApiCommunicator('http://127.0.0.1:1', 'token');
+        $communicator->setRequestTimeout(2.0);
+        $communicator->setLogger($logger);
+
+        for ($i = 0; $i < 2; $i++) {
+            try {
+                $communicator->sendRequest('GET', 'Users');
+                $this->fail('A RequestException was expected');
+            } catch (RequestException $ex) {
+                $this->assertNull($ex->getHttpStatus());
+            }
+        }
+
+        // Logged when the default client is created
+        $created = array_keys($logger->messages, 'The connection to the Daktela API is not secure', true);
+        $this->assertCount(1, $created);
+        $this->assertCount(2, array_keys($logger->messages, 'Connection error', true));
+    }
+
+    public function testClientOfAnotherProcessIsNotReused(): void
+    {
+        $communicator = new ApiCommunicator('https://example.com', 'token');
+        $inherited = self::invoke($communicator, 'defaultClient');
+
+        // As after a fork: the cached client was created by a process with another id
+        $property = new \ReflectionProperty(ApiCommunicator::class, 'defaultClients');
+        if (PHP_VERSION_ID < 80100) {
+            $property->setAccessible(true);
+        }
+        $property->getValue()[$communicator] = [-1, $inherited];
+
+        $own = self::invoke($communicator, 'defaultClient');
+        $this->assertNotSame($inherited, $own);
+        $this->assertSame($own, self::invoke($communicator, 'defaultClient'));
+    }
+
+    public function testOnlyLoginAndRefreshRequestsGetTheCredentials(): void
+    {
+        $method = new \ReflectionMethod(ApiCommunicator::class, 'credentialsPayload');
+        if (PHP_VERSION_ID < 80100) {
+            $method->setAccessible(true);
+        }
+
+        $this->expectException(\LogicException::class);
+        $method->invoke(new ApiCommunicator('https://example.com', 'token'), 'whoim');
+    }
+
+    public function testLoginRequestIsLoggedAsHavingABody(): void
+    {
+        $logger = new class extends AbstractLogger {
+            public array $entries = [];
+
+            public function log($level, $message, array $context = []): void
+            {
+                $this->entries[] = [(string)$message, $context];
+            }
+        };
+        $communicator = $this->communicator([
+            new GuzzleResponse(200, [], '{"error":[],"result":{"accessToken":"a","refreshToken":"r"}}'),
+            new GuzzleResponse(200, [], '{"error":[],"result":[]}'),
+        ]);
+        $communicator->setLogger($logger);
+        $communicator->login('api', 'password');
+        $communicator->sendRequest('GET', 'Users');
+
+        $sent = array_values(array_filter($logger->entries, static fn (array $entry): bool => $entry[0] === 'Sending API request'));
+        $this->assertCount(2, $sent);
+        $this->assertTrue($sent[0][1]['has_body']);
+        $this->assertFalse($sent[1][1]['has_body']);
     }
 
     public function testCloneBuildsItsOwnDefaultClientAndTheObjectStaysSerializable(): void
@@ -298,6 +426,10 @@ class ApiCommunicatorHardeningTest extends TestCase
             'JSON with unescaped unicode and slashes' => [
                 $password,
                 (string)json_encode(['error' => ['password' => $message]], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            ],
+            'JSON with HTML entities' => [
+                $password,
+                (string)json_encode(['error' => [htmlspecialchars($message, ENT_QUOTES)], 'result' => [htmlentities($password) => 1]]),
             ],
             'HTML page of a proxy' => [
                 $password,

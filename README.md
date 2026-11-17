@@ -223,7 +223,7 @@ $request = RequestFactory::buildDeleteRequest("CampaignsRecords")
 $response = $client->execute($request);
 ```
 
-Object names and relation names are URL-encoded as single path segments. Values that could address a different endpoint (empty values, `.` and `..`, also percent-encoded, and values containing `/`, `\`, or NUL) are rejected with a `RequestException`, as are model names containing dot segments, `?`, `#`, or NUL. A relation set without an object name is rejected as well, because the request would read the records of the model instead.
+Object names and relation names are URL-encoded as single path segments. Values that could address a different endpoint (empty values, `.` and `..`, also percent-encoded, and values containing `/`, `\`, or NUL) are rejected with a `RequestException`, as are model names containing dot segments, a literal `?` or `#`, or NUL. A relation set without an object name is rejected as well, because the request would read the records of the model instead.
 
 ## Processing response
 
@@ -613,7 +613,7 @@ The full suite also contains live API integration tests, which are skipped unles
 - The health check tests need `INSTANCE`. The static token tests also need `ACCESS_TOKEN`, and the Bearer test requires Daktela 31.37.0, 32.36.0, 33.14.0, or later.
 - The login tests need `INSTANCE`, `LOGIN_USERNAME`, and `LOGIN_PASSWORD` of an account without two-factor authentication.
 
-`composer check` runs what CI runs besides the version matrix: `composer validate`, the coding standard (PSR-12, `phpcs.xml.dist`), PHPStan, and the tests. Run it in the same container:
+`composer check` runs `composer validate`, the coding standard (PSR-12, `phpcs.xml.dist`), PHPStan, and the tests. CI runs the same on every supported PHP and Guzzle version, and also requires 90% line coverage. Run it in the same container:
 
 ```bash
 docker run --rm -v "$PWD:/app" -w /app composer:2 check

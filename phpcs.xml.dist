@@ -19,7 +19,7 @@
         </properties>
     </rule>
 
-    <!-- Test doubles: several small classes in one file, and methods named after the framework's -->
+    <!-- Test doubles: several small classes in one file -->
     <rule ref="PSR1.Classes.ClassDeclaration.MultipleClasses">
         <exclude-pattern>tests/*</exclude-pattern>
     </rule>

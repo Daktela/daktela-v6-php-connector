@@ -644,11 +644,20 @@ class ClientTest extends TestCase
     {
         return [
             'query' => ['Users.json?accessToken=other&x='],
-            'encoded query' => ['Users%3FaccessToken=other'],
             'fragment' => ['Users#'],
-            'encoded fragment' => ['Users%23'],
             'NUL byte' => ["Users\0"],
+            'encoded NUL byte' => ['Users%00'],
         ];
+    }
+
+    public function testPercentEncodedQueryAndFragmentCharactersStayInThePathOfAModel(): void
+    {
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->once())->method('sendRequest')
+            ->with('GET', 'Statuses/Break%20%231%3F', $this->anything())
+            ->willReturn(new Response([], 0, [], 200));
+
+        $this->createClient($communicator)->execute(new ReadRequest('Statuses/Break%20%231%3F'));
     }
 
     public function testReadAllCollectsThePagesInOrder(): void

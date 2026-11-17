@@ -372,7 +372,8 @@ class Client
      */
     private function validateModel(string $model): string
     {
-        if (strpbrk(rawurldecode($model), "?#\0") !== false) {
+        // A percent-encoded `?` or `#` stays a part of the path
+        if (strpbrk($model, '?#') !== false || str_contains(rawurldecode($model), "\0")) {
             throw new RequestException('Invalid model: ' . $model);
         }
         foreach (preg_split('#[/\\\\]#', rawurldecode($model)) as $part) {

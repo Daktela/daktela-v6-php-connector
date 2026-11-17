@@ -95,7 +95,8 @@ class ApiCommunicator
      */
     private static ?\WeakMap $loginSessions = null;
     /**
-     * @var \WeakMap<ApiCommunicator, ClientInterface>|null default HTTP clients, built once per object so that
+     * @var \WeakMap<ApiCommunicator, array{int|false, ClientInterface}>|null default HTTP clients with the id of
+     *     the process that created them, built once per object so that
      *     connections are reused. They are kept outside the objects' properties because their handlers are
      *     closures, which serialize() rejects; a clone and an unserialized copy build their own.
      */
@@ -342,6 +343,11 @@ class ApiCommunicator
             $status = $ex->getHttpStatus();
             // A successful response that could not be parsed may contain the new tokens
             $body = $status !== null && $status >= 300 ? $ex->getResponseBody() : null;
+            if ($body !== null && $apiEndpoint === 'login') {
+                // Also a body that did not come with an HTTP error of the client, e.g. one that is not JSON
+                // on a redirect response, is rebuilt or left out
+                $body = $this->redactLoginErrorBody($body);
+            }
             if ($ex instanceof NotFoundException) {
                 throw new NotFoundException($ex->getMessage(), null, $body, $ex->getApiErrors());
             }
@@ -455,8 +461,12 @@ class ApiCommunicator
     private function credentialsPayload(string $apiEndpoint): array
     {
         $session = $this->session();
-        if ($apiEndpoint !== 'login') {
+        if ($apiEndpoint === 'refreshAccessToken') {
             return ['refresh_token' => $session?->tokens?->getRefreshToken() ?? ''];
+        }
+        if ($apiEndpoint !== 'login') {
+            // No other request is sent without the access token; it must not get the credentials
+            throw new \LogicException('Only login and refreshAccessToken requests carry credentials.');
         }
 
         return [
@@ -502,12 +512,7 @@ class ApiCommunicator
         #[\SensitiveParameter] ?array $data,
         bool $authenticate
     ): Response {
-        try {
-            $client = $this->httpClient ?? $this->defaultClient();
-        } catch (\InvalidArgumentException $invalidUrl) {
-            // The message would quote the URL, which is not needed to find the mistake
-            throw new RequestException('The instance URL is not a valid URL.');
-        }
+        $client = $this->httpClient ?? $this->defaultClient();
         $request = $this->buildRequest($method, $apiEndpoint, $queryParams, $data, $authenticate);
         // Login and refresh payloads hold credentials, which a 307/308 redirect would send to its target
         $sendOptions = $authenticate ? [] : ['allow_redirects' => false];
@@ -537,7 +542,7 @@ class ApiCommunicator
             $this->logger?->debug('Sending API request', [
                 'method' => $method,
                 'endpoint' => $apiEndpoint,
-                'has_body' => !is_null($data),
+                'has_body' => !$authenticate || $data !== null,
                 'attempt' => $attempt + 1,
             ]);
 
@@ -586,6 +591,7 @@ class ApiCommunicator
                     'endpoint' => $apiEndpoint,
                     'error' => $exception->getMessage(),
                     'code' => $ex->getCode(),
+                    'exception' => get_class($ex),
                 ]);
                 throw $exception;
             }
@@ -689,6 +695,9 @@ class ApiCommunicator
         $body = $this->redactPassword ? $this->redactLoginErrorBody($body) : $this->redact($body);
         $decoded = json_decode($body);
         $apiErrors = is_object($decoded) ? $this->redactValues($this->normalizeErrors($decoded->error ?? null)) : [];
+        if ($this->redactPassword) {
+            $apiErrors = $this->maskPassword($apiErrors);
+        }
         $sanitized = $this->sanitize($original, $body);
         $message = $sanitized === null ? $this->redact($original->getMessage()) : $sanitized->getMessage();
         $previous = $this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY ? null : $sanitized;
@@ -720,10 +729,42 @@ class ApiCommunicator
         if (!is_object($decoded) && !is_array($decoded)) {
             return '';
         }
-        $redacted = $this->redactValues(is_object($decoded) ? get_object_vars($decoded) : $decoded);
+        $redacted = $this->maskPassword($this->redactValues(is_object($decoded) ? get_object_vars($decoded) : $decoded));
         $encoded = json_encode(is_object($decoded) ? (object)$redacted : $redacted);
 
         return $encoded === false ? '' : $this->redact($encoded);
+    }
+
+    /**
+     * Replaces every string, including map keys, that still contains the password of the login session once its
+     * HTML entities or percent-encoding are decoded, e.g. `&amp;` for `&`. The whole string is replaced, because
+     * the position of the password in the encoded text is not known.
+     * @param array $values decoded values, possibly nested in lists, maps and objects
+     * @return array values without such strings
+     */
+    private function maskPassword(array $values): array
+    {
+        $session = $this->session();
+        if ($session === null || $session->password === '') {
+            return $values;
+        }
+        $echoes = function (string $text) use ($session): bool {
+            return str_contains(html_entity_decode($text, ENT_QUOTES | ENT_HTML5), $session->password)
+                || str_contains(rawurldecode($text), $session->password);
+        };
+        $masked = [];
+        foreach ($values as $key => $value) {
+            if (is_string($value)) {
+                $value = $echoes($value) ? '***' : $value;
+            } elseif (is_array($value)) {
+                $value = $this->maskPassword($value);
+            } elseif (is_object($value)) {
+                $value = (object)$this->maskPassword(get_object_vars($value));
+            }
+            $masked[is_string($key) && $echoes($key) ? '***' : $key] = $value;
+        }
+
+        return $masked;
     }
 
     /**
@@ -1120,10 +1161,10 @@ class ApiCommunicator
         // An instance URL that already ends with the API namespace is accepted, as before
         $basePath = rtrim((string)parse_url((string)self::normalizeUrl($this->baseUrl), PHP_URL_PATH), '/');
         $basePath = (string)preg_replace('#/api/v6$#i', '', $basePath);
-        if ($basePath !== '') {
-            // A request target that starts with `//` names another host, which would get the credentials
-            $basePath = '/' . ltrim($basePath, '/');
-        }
+        // A request target that starts with `//` names another host, which would get the credentials. The slashes
+        // are removed after the API namespace: `//api/v6` leaves `/`, which would start the target with `//api`
+        $basePath = trim($basePath, '/');
+        $basePath = $basePath === '' ? '' : '/' . $basePath;
         // The separator is given because http_build_query() otherwise uses the arg_separator.output ini setting
         $requestUri = $basePath . self::API_NAMESPACE . lcfirst($apiEndpoint) . ".json?" . http_build_query($query, '', '&');
         try {
@@ -1139,11 +1180,18 @@ class ApiCommunicator
 
         try {
             // Guzzle 8 sends the method as given, Guzzle 7 in upper case
-            return new Request(strtoupper($method), $requestUri, $headers, $body);
+            $request = new Request(strtoupper($method), $requestUri, $headers, $body);
         } catch (\InvalidArgumentException $ex) {
             // An invalid header value, e.g. an access token with a trailing newline, is quoted in the message
             throw new RequestException($this->redact($ex->getMessage()));
         }
+        if ($request->getUri()->getHost() !== '' || $request->getUri()->getScheme() !== '') {
+            // The request is a path the HTTP client resolves against the instance; one that names a host of its
+            // own would take the credentials there
+            throw new RequestException('The request would not be sent to the instance; check the instance URL.');
+        }
+
+        return $request;
     }
 
     /**
@@ -1203,16 +1251,23 @@ class ApiCommunicator
 
     /**
      * Returns the default Guzzle HTTP client of this object, creating it on the first request and after the
-     * timeout or the SSL verification setting has changed.
+     * timeout or the SSL verification setting has changed. A forked process builds its own client: the one
+     * of its parent holds open connections, which two processes must not use at once.
      *
      * @return ClientInterface
-     * @throws \InvalidArgumentException when the instance URL cannot be parsed
+     * @throws RequestException when the instance URL cannot be parsed
      */
     private function defaultClient(): ClientInterface
     {
         self::$defaultClients ??= new \WeakMap();
+        $pid = getmypid();
+        $cached = self::$defaultClients[$this] ?? null;
+        if ($cached === null || $cached[0] !== $pid) {
+            $cached = [$pid, $this->createDefaultClient()];
+            self::$defaultClients[$this] = $cached;
+        }
 
-        return self::$defaultClients[$this] ??= $this->createDefaultClient();
+        return $cached[1];
     }
 
     /**
@@ -1229,11 +1284,16 @@ class ApiCommunicator
      * Creates the default Guzzle HTTP client with configured settings.
      *
      * @return ClientInterface
-     * @throws \InvalidArgumentException when the instance URL cannot be parsed
+     * @throws RequestException when the instance URL cannot be parsed
      */
     private function createDefaultClient(): ClientInterface
     {
-        $instance = new Uri((string)self::normalizeUrl($this->baseUrl));
+        try {
+            $instance = new Uri((string)self::normalizeUrl($this->baseUrl));
+        } catch (\InvalidArgumentException $invalidUrl) {
+            // The message would quote the URL, which is not needed to find the mistake
+            throw new RequestException('The instance URL is not a valid URL.');
+        }
         if (!$this->verifySsl || strcasecmp($instance->getScheme(), 'https') !== 0) {
             $this->logger?->warning('The connection to the Daktela API is not secure', [
                 'https' => strcasecmp($instance->getScheme(), 'https') === 0,

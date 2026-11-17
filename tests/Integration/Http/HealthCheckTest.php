@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Daktela\Tests\DaktelaV6\Http;
+namespace Daktela\Tests\Integration\Http;
 
 use Daktela\DaktelaV6\Auth\InMemoryTokenStore;
 use Daktela\DaktelaV6\Auth\TokenSet;

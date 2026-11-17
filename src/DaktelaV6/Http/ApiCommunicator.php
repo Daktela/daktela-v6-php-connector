@@ -14,7 +14,6 @@ use Daktela\DaktelaV6\Response\Response;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\BadResponseException;
-use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException as GuzzleRequestException;
 use GuzzleHttp\Exception\ResponseTransferException;
 use GuzzleHttp\Exception\TransferException;
@@ -39,12 +38,12 @@ use Throwable;
 class ApiCommunicator
 {
     /** @var int Authentication method using HTTP header X-AUTH-TOKEN (default; legacy in the Daktela API docs) */
-    const AUTHENTICATION_METHOD_HEADER = 1;
+    public const AUTHENTICATION_METHOD_HEADER = 1;
     /** @var int Authentication method using query parameter accessToken */
-    const AUTHENTICATION_METHOD_QUERY = 2;
+    public const AUTHENTICATION_METHOD_QUERY = 2;
     /** @var int Authentication method using HTTP header Authorization: Bearer (Daktela 31.37.0, 32.36.0, 33.14.0 and later) */
-    const AUTHENTICATION_METHOD_BEARER = 3;
-    
+    public const AUTHENTICATION_METHOD_BEARER = 3;
+
     /** @var string Constant defining the base API URL */
     private const API_NAMESPACE = "/api/v6/";
     /** @var string Constant defining the User-Agent of the HTTP requests */
@@ -66,15 +65,15 @@ class ApiCommunicator
     /** @var string Health check error used for a successful response that is not a whoim response */
     private const UNEXPECTED_RESPONSE_ERROR = 'The API returned an unexpected response without user information; check the instance URL.';
     /** @var array static variable containing all singleton instances of the transport class */
-    private static $singletons = [];
+    private static array $singletons = [];
     /** @var string URL of the Daktela instance */
-    private $baseUrl;
+    private string $baseUrl;
     /** @var string Access token used for communicating with Daktela REST API */
-    private $accessToken;
+    private string $accessToken;
     /** @var float Timeout for HTTP request sent to API */
-    private $requestTimeout = 2.0;
+    private float $requestTimeout = 2.0;
     /** @var int The authentication method to use */
-    private $authenticationMethod = self::AUTHENTICATION_METHOD_HEADER;
+    private int $authenticationMethod = self::AUTHENTICATION_METHOD_HEADER;
     /** @var bool Whether SSL certificate should be verified */
     private bool $verifySsl = true;
     /** @var string|null Custom User-Agent suffix to append */
@@ -95,6 +94,13 @@ class ApiCommunicator
      *     the session of the original; an unserialized copy has none.
      */
     private static ?\WeakMap $loginSessions = null;
+    /**
+     * @var \WeakMap<ApiCommunicator, array{int|false, ClientInterface}>|null default HTTP clients with the id of
+     *     the process that created them, built once per object so that
+     *     connections are reused. They are kept outside the objects' properties because their handlers are
+     *     closures, which serialize() rejects; a clone and an unserialized copy build their own.
+     */
+    private static ?\WeakMap $defaultClients = null;
     /** @var bool whether redact() also removes the password of the login session, while a login request is sent */
     private bool $redactPassword = false;
 
@@ -103,7 +109,7 @@ class ApiCommunicator
      * @param string $baseUrl URL of the Daktela instance
      * @param string $accessToken access token of user used for connecting to Daktela V6
      */
-    public function __construct(string $baseUrl, string $accessToken)
+    public function __construct(string $baseUrl, #[\SensitiveParameter] string $accessToken)
     {
         $this->baseUrl = $baseUrl;
         $this->accessToken = $accessToken;
@@ -118,7 +124,7 @@ class ApiCommunicator
      * @param string $accessToken access token of user used for connecting to Daktela V6
      * @return ApiCommunicator instance of the transport class
      */
-    public static function getInstance(string $baseUrl, string $accessToken): self
+    public static function getInstance(string $baseUrl, #[\SensitiveParameter] string $accessToken): self
     {
         $key = hash('sha256', $baseUrl . "\0" . $accessToken);
         if (!isset(self::$singletons[$key])) {
@@ -161,9 +167,14 @@ class ApiCommunicator
 
     /**
      * Starts a session by logging in with a username and password instead of using a static access token.
+     * Call it on an ApiCommunicator of its own, not on one shared through getInstance(): the session replaces
+     * the user of every holder of the object.
      * The access token of the session is short-lived; the connector refreshes it before it expires, and
      * logs in again when the session has ended. With a token store, the session is reused across processes
-     * and no login is sent while the stored refresh token is valid. After the server rejects the
+     * and no login is sent while the stored refresh token is valid: the password is then not checked, only
+     * the user name and the instance the stored tokens belong to. Do not use login() with a token store to
+     * check the password of a user who signs in to your application; call it without a store for that.
+     * After the server rejects the
      * credentials, no further login is sent until login() is called again. Accounts with two-factor
      * authentication cannot log in this way; use a static API token for them.
      * @param string $username name of the Daktela user
@@ -310,8 +321,8 @@ class ApiCommunicator
 
     /**
      * Sends a login or token refresh request, which carries its credentials in the payload instead of the
-     * access token. The payload is built here from the session, so that no frame in an exception trace
-     * has the credentials as an argument, and the exceptions are created again in this frame, without the
+     * access token. The payload is built from the session in buildRequest(), so that no frame of an exception
+     * trace or of a backtrace taken by a logger has the credentials as an argument, and the exceptions are created again in this frame, without the
      * HTTP client's exception (its request contains the payload) and without the trace below.
      * @param string $apiEndpoint login or refreshAccessToken
      * @return TokenSet tokens returned by the API
@@ -321,33 +332,28 @@ class ApiCommunicator
     {
         $session = $this->session();
         $current = $session?->tokens;
-        $payload = $apiEndpoint === 'login'
-            ? [
-                'username' => $session === null ? '' : $session->username,
-                'password' => $session === null ? '' : $session->password,
-                // the tokens are returned instead of being set as cookies
-                'only_token' => 'true',
-                // the connector refreshes the session itself, the server does not renew it implicitly
-                'client_side_refresh' => 'true',
-            ]
-            : ['refresh_token' => $current === null ? '' : $current->getRefreshToken()];
         // An error response to a login may echo the password, so it is redacted from messages, the stored body,
         // and log entries while the login is sent
         $this->redactPassword = $apiEndpoint === 'login';
         try {
-            $response = $this->dispatch('POST', $apiEndpoint, [], $payload, false);
+            $response = $this->dispatch('POST', $apiEndpoint, [], null, false);
         } catch (RateLimitException $ex) {
             throw new RateLimitException($ex->getRetryAfterSeconds());
         } catch (RequestException $ex) {
             $status = $ex->getHttpStatus();
             // A successful response that could not be parsed may contain the new tokens
             $body = $status !== null && $status >= 300 ? $ex->getResponseBody() : null;
+            if ($body !== null && $apiEndpoint === 'login') {
+                // Also a body that did not come with an HTTP error of the client, e.g. one that is not JSON
+                // on a redirect response, is rebuilt or left out
+                $body = $this->redactLoginErrorBody($body);
+            }
             if ($ex instanceof NotFoundException) {
                 throw new NotFoundException($ex->getMessage(), null, $body, $ex->getApiErrors());
             }
             throw new RequestException($ex->getMessage(), $ex->getCode(), null, $status, $body, $ex->getApiErrors());
         } catch (\Throwable $ex) {
-            // Anything else, e.g. from a logger, has frames with the payload as an argument
+            // Anything else, e.g. from a logger: its message and its own previous exceptions are not trusted
             throw new RequestException($this->redact($ex->getMessage()));
         } finally {
             $this->redactPassword = false;
@@ -449,6 +455,31 @@ class ApiCommunicator
     }
 
     /**
+     * @param string $apiEndpoint login or refreshAccessToken
+     * @return array payload of a login or token refresh request, built from the login session
+     */
+    private function credentialsPayload(string $apiEndpoint): array
+    {
+        $session = $this->session();
+        if ($apiEndpoint === 'refreshAccessToken') {
+            return ['refresh_token' => $session?->tokens?->getRefreshToken() ?? ''];
+        }
+        if ($apiEndpoint !== 'login') {
+            // No other request is sent without the access token; it must not get the credentials
+            throw new \LogicException('Only login and refreshAccessToken requests carry credentials.');
+        }
+
+        return [
+            'username' => $session === null ? '' : $session->username,
+            'password' => $session === null ? '' : $session->password,
+            // the tokens are returned instead of being set as cookies
+            'only_token' => 'true',
+            // the connector refreshes the session itself, the server does not renew it implicitly
+            'client_side_refresh' => 'true',
+        ];
+    }
+
+    /**
      * Hides the access token from var_dump() and print_r(). The credentials and tokens of a login session
      * are not properties of this object at all.
      * @return array properties of the object with the access token replaced
@@ -469,7 +500,8 @@ class ApiCommunicator
      * @param string $apiEndpoint API endpoint
      * @param array $queryParams query parameters
      * @param array|null $data request payload, or null when none
-     * @param bool $authenticate whether to send the access token
+     * @param bool $authenticate whether to send the access token; false for a login or token refresh request,
+     *     whose payload is built from the login session
      * @return Response the resulting response of the request sent
      * @throws RequestException request exception with details
      */
@@ -477,10 +509,10 @@ class ApiCommunicator
         string $method,
         string $apiEndpoint,
         array $queryParams,
-        ?array $data,
+        #[\SensitiveParameter] ?array $data,
         bool $authenticate
     ): Response {
-        $client = $this->httpClient ?? $this->createDefaultClient();
+        $client = $this->httpClient ?? $this->defaultClient();
         $request = $this->buildRequest($method, $apiEndpoint, $queryParams, $data, $authenticate);
         // Login and refresh payloads hold credentials, which a 307/308 redirect would send to its target
         $sendOptions = $authenticate ? [] : ['allow_redirects' => false];
@@ -488,7 +520,6 @@ class ApiCommunicator
         $retryCount = $this->retryConfig?->getMaxRetries() ?? 0;
         $rateLimitRetryCount = $this->rateLimitConfig?->shouldAutoRetry() ? max(1, $retryCount) : 0;
         $maxAttempts = 1 + max($retryCount, $rateLimitRetryCount);
-        $lastException = null;
         $applyRetryDelay = false;
         // buildRequest() upper-cases the method
         $canRetryAfterSend = in_array($request->getMethod(), self::IDEMPOTENT_METHODS, true)
@@ -504,14 +535,14 @@ class ApiCommunicator
                     'delay_ms' => $delayMs,
                     'endpoint' => $apiEndpoint,
                 ]);
-                usleep($delayMs * 1000);
+                usleep(max(0, $delayMs) * 1000);
             }
             $applyRetryDelay = false;
 
             $this->logger?->debug('Sending API request', [
                 'method' => $method,
                 'endpoint' => $apiEndpoint,
-                'has_body' => !is_null($data),
+                'has_body' => !$authenticate || $data !== null,
                 'attempt' => $attempt + 1,
             ]);
 
@@ -526,9 +557,9 @@ class ApiCommunicator
                 $httpResponse = $ex->getResponse();
             } catch (NetworkExceptionInterface | ResponseTransferException $ex) {
                 // No response, or one that broke off after its headers: the connection failed, timed out, or
-                // was reset. Guzzle 7 reports these as ConnectException; Guzzle 8 as NetworkException, or as
-                // ResponseTransferException once the headers were received.
-                $lastException = $ex;
+                // was reset. Guzzle 7 reports a failed connection and a timeout as ConnectException, and a reset
+                // or a truncated body as a plain RequestException, which is not retried; Guzzle 8 reports them as
+                // NetworkException, or as ResponseTransferException once the headers were received.
                 // The message of the wrapped exception, as a broken-off response may be summarized in the message
                 $exception = $this->wrapException($ex);
                 $this->logger?->warning('Connection error', [
@@ -538,7 +569,8 @@ class ApiCommunicator
 
                 // A timeout may happen after the server received the request, so only
                 // idempotent requests (or explicitly allowed ones) are repeated then.
-                if ($this->retryConfig === null
+                if (
+                    $this->retryConfig === null
                     || !$this->retryConfig->shouldRetryOnConnectionError()
                     || (!$canRetryAfterSend && !$this->failedBeforeSend($ex, $request))
                 ) {
@@ -550,15 +582,16 @@ class ApiCommunicator
                 }
                 $applyRetryDelay = true;
                 continue;
-
-            } catch (GuzzleException | \Exception $ex) {
-                // Any other client exception, e.g. an invalid redirect URL or one of a custom HTTP client
+            } catch (Throwable $ex) {
+                // Any other client exception, e.g. an invalid redirect URL or one of a custom HTTP client, and
+                // errors such as a TypeError of a custom middleware, whose trace holds the request with the token
                 $exception = $this->wrapException($ex);
                 $this->logger?->error('API request failed', [
                     'method' => $method,
                     'endpoint' => $apiEndpoint,
                     'error' => $exception->getMessage(),
                     'code' => $ex->getCode(),
+                    'exception' => get_class($ex),
                 ]);
                 throw $exception;
             }
@@ -574,12 +607,12 @@ class ApiCommunicator
                 continue;
             }
 
-            if ($this->retryConfig !== null
+            if (
+                $this->retryConfig !== null
                 && $canRetryAfterSend
                 && $attempt < $maxAttempts - 1
                 && $this->retryConfig->isRetryableStatus($statusCode)
             ) {
-                $lastException = $httpException;
                 $this->logger?->warning('Retryable status code received', [
                     'status' => $statusCode,
                     'endpoint' => $apiEndpoint,
@@ -602,10 +635,7 @@ class ApiCommunicator
             return $this->parseResponse($httpResponse);
         }
 
-        // If we exit the loop without returning, throw exception
-        if ($lastException !== null) {
-            throw $this->wrapException($lastException, 'Max retries exceeded: ');
-        }
+        // Not reached: the last attempt returns or throws
         throw new RequestException('Max retries exceeded: Unknown error');
     }
 
@@ -657,13 +687,17 @@ class ApiCommunicator
         [$original, $httpResponse] = [$ex, $response];
         $ex = $response = null;
         try {
-            $body = $this->redact((string)$httpResponse->getBody());
+            $body = (string)$httpResponse->getBody();
         } catch (\RuntimeException $readError) {
             // e.g. a detached or write-only body of a custom HTTP client
             $body = '';
         }
+        $body = $this->redactPassword ? $this->redactLoginErrorBody($body) : $this->redact($body);
         $decoded = json_decode($body);
         $apiErrors = is_object($decoded) ? $this->redactValues($this->normalizeErrors($decoded->error ?? null)) : [];
+        if ($this->redactPassword) {
+            $apiErrors = $this->maskPassword($apiErrors);
+        }
         $sanitized = $this->sanitize($original, $body);
         $message = $sanitized === null ? $this->redact($original->getMessage()) : $sanitized->getMessage();
         $previous = $this->authenticationMethod === self::AUTHENTICATION_METHOD_QUERY ? null : $sanitized;
@@ -676,6 +710,61 @@ class ApiCommunicator
         }
 
         return new RequestException($message, $code, $previous, $status, $body, $apiErrors);
+    }
+
+    /**
+     * Redacts the error response to a login, which may echo the password. The server can spell the password
+     * with escapes the redaction of the raw text cannot match, e.g. `\u0026` for `&`, so a JSON body is
+     * decoded, redacted value by value, and encoded again, and any other body is left out.
+     * @param string $rawBody body of the error response
+     * @return string body without the password and the tokens, or an empty string
+     */
+    private function redactLoginErrorBody(string $rawBody): string
+    {
+        // The raw body is moved out of the parameters, which the trace of an exception created below records
+        $raw = $rawBody;
+        $rawBody = '';
+        $decoded = json_decode($raw);
+        $raw = '';
+        if (!is_object($decoded) && !is_array($decoded)) {
+            return '';
+        }
+        $redacted = $this->maskPassword($this->redactValues(is_object($decoded) ? get_object_vars($decoded) : $decoded));
+        $encoded = json_encode(is_object($decoded) ? (object)$redacted : $redacted);
+
+        return $encoded === false ? '' : $this->redact($encoded);
+    }
+
+    /**
+     * Replaces every string, including map keys, that still contains the password of the login session once its
+     * HTML entities or percent-encoding are decoded, e.g. `&amp;` for `&`. The whole string is replaced, because
+     * the position of the password in the encoded text is not known.
+     * @param array $values decoded values, possibly nested in lists, maps and objects
+     * @return array values without such strings
+     */
+    private function maskPassword(array $values): array
+    {
+        $session = $this->session();
+        if ($session === null || $session->password === '') {
+            return $values;
+        }
+        $echoes = function (string $text) use ($session): bool {
+            return str_contains(html_entity_decode($text, ENT_QUOTES | ENT_HTML5), $session->password)
+                || str_contains(rawurldecode($text), $session->password);
+        };
+        $masked = [];
+        foreach ($values as $key => $value) {
+            if (is_string($value)) {
+                $value = $echoes($value) ? '***' : $value;
+            } elseif (is_array($value)) {
+                $value = $this->maskPassword($value);
+            } elseif (is_object($value)) {
+                $value = (object)$this->maskPassword(get_object_vars($value));
+            }
+            $masked[is_string($key) && $echoes($key) ? '***' : $key] = $value;
+        }
+
+        return $masked;
     }
 
     /**
@@ -1003,7 +1092,8 @@ class ApiCommunicator
         ]);
 
         // If no rate limit config or auto-retry disabled, throw exception
-        if ($this->rateLimitConfig === null
+        if (
+            $this->rateLimitConfig === null
             || !$this->rateLimitConfig->shouldAutoRetry()
             || !$canRetry
         ) {
@@ -1021,7 +1111,7 @@ class ApiCommunicator
 
         // Wait and signal to retry
         $this->logger?->info('Waiting for rate limit reset', ['seconds' => $waitSeconds]);
-        sleep($waitSeconds);
+        sleep(max(0, $waitSeconds));
     }
 
     /**
@@ -1031,14 +1121,16 @@ class ApiCommunicator
      * @param string $apiEndpoint API endpoint
      * @param array $queryParams Query parameters
      * @param array|null $data Request body data
+     * @param bool $authenticate whether to send the access token; false for a login or token refresh request,
+     *     whose payload is built here from the login session
      * @return Request PSR-7 request object
      */
     private function buildRequest(
         string $method,
         string $apiEndpoint,
         array $queryParams,
-        ?array $data,
-        bool $authenticate = true
+        #[\SensitiveParameter] ?array $data,
+        bool $authenticate
     ): Request {
         $userAgent = self::USER_AGENT;
         if ($this->userAgentSuffix !== null) {
@@ -1046,7 +1138,8 @@ class ApiCommunicator
         }
         $headers = ["User-Agent" => $userAgent, "Content-Type" => "application/json"];
 
-        if ($authenticate
+        if (
+            $authenticate
             && $this->authenticationMethod !== self::AUTHENTICATION_METHOD_QUERY
             && preg_match('/[\x00-\x08\x0A-\x1F\x7F]/', $this->currentAccessToken()) === 1
         ) {
@@ -1068,9 +1161,17 @@ class ApiCommunicator
         // An instance URL that already ends with the API namespace is accepted, as before
         $basePath = rtrim((string)parse_url((string)self::normalizeUrl($this->baseUrl), PHP_URL_PATH), '/');
         $basePath = (string)preg_replace('#/api/v6$#i', '', $basePath);
-        $requestUri = $basePath . self::API_NAMESPACE . lcfirst($apiEndpoint) . ".json?" . http_build_query($query);
+        // A request target that starts with `//` names another host, which would get the credentials. The slashes
+        // are removed after the API namespace: `//api/v6` leaves `/`, which would start the target with `//api`
+        $basePath = trim($basePath, '/');
+        $basePath = $basePath === '' ? '' : '/' . $basePath;
+        // The separator is given because http_build_query() otherwise uses the arg_separator.output ini setting
+        $requestUri = $basePath . self::API_NAMESPACE . lcfirst($apiEndpoint) . ".json?" . http_build_query($query, '', '&');
         try {
-            $body = $data !== null ? json_encode($data, JSON_THROW_ON_ERROR) : null;
+            // A local variable: the credentials of a login must not become the value of a parameter
+            $payload = $authenticate ? $data : $this->credentialsPayload($apiEndpoint);
+            $body = $payload !== null ? json_encode($payload, JSON_THROW_ON_ERROR) : null;
+            $payload = null;
         } catch (\JsonException $ex) {
             // e.g. a string that is not valid UTF-8; the message does not quote the payload, and the exception,
             // whose trace holds the payload as an argument, is not chained
@@ -1079,11 +1180,18 @@ class ApiCommunicator
 
         try {
             // Guzzle 8 sends the method as given, Guzzle 7 in upper case
-            return new Request(strtoupper($method), $requestUri, $headers, $body);
+            $request = new Request(strtoupper($method), $requestUri, $headers, $body);
         } catch (\InvalidArgumentException $ex) {
             // An invalid header value, e.g. an access token with a trailing newline, is quoted in the message
             throw new RequestException($this->redact($ex->getMessage()));
         }
+        if ($request->getUri()->getHost() !== '' || $request->getUri()->getScheme() !== '') {
+            // The request is a path the HTTP client resolves against the instance; one that names a host of its
+            // own would take the credentials there
+            throw new RequestException('The request would not be sent to the instance; check the instance URL.');
+        }
+
+        return $request;
     }
 
     /**
@@ -1101,7 +1209,7 @@ class ApiCommunicator
         // response, whose body may echo the token, is moved out of them
         $httpResponse = null;
         $responseBody = $rawBody;
-        if (mb_strlen($responseBody)) {
+        if ($responseBody !== '') {
             try {
                 $responseBody = json_decode($responseBody, false, 512, JSON_THROW_ON_ERROR);
             } catch (\JsonException $ex) {
@@ -1124,8 +1232,13 @@ class ApiCommunicator
             return new Response(null, 0, $errors, $status);
         }
 
-        $responseData = $responseBody->result->data ?? ($responseBody->result ?? null);
-        $total = (int)($responseBody->result->total ?? 1);
+        $result = $responseBody->result;
+        // A list is wrapped as {data, total}; its data may be null on an error page. Any other result, e.g. a
+        // single record, is returned as it is, also when the record has a `data` field of its own that is null.
+        $isList = is_object($result) && property_exists($result, 'data')
+            && ($result->data !== null || property_exists($result, 'total'));
+        $responseData = $isList ? $result->data : $result;
+        $total = (int)(is_object($result) ? ($result->total ?? 1) : 1);
 
         $this->logger?->debug('API response received', [
             'status' => $status,
@@ -1137,13 +1250,56 @@ class ApiCommunicator
     }
 
     /**
+     * Returns the default Guzzle HTTP client of this object, creating it on the first request and after the
+     * timeout or the SSL verification setting has changed. A forked process builds its own client: the one
+     * of its parent holds open connections, which two processes must not use at once.
+     *
+     * @return ClientInterface
+     * @throws RequestException when the instance URL cannot be parsed
+     */
+    private function defaultClient(): ClientInterface
+    {
+        self::$defaultClients ??= new \WeakMap();
+        $pid = getmypid();
+        $cached = self::$defaultClients[$this] ?? null;
+        if ($cached === null || $cached[0] !== $pid) {
+            $cached = [$pid, $this->createDefaultClient()];
+            self::$defaultClients[$this] = $cached;
+        }
+
+        return $cached[1];
+    }
+
+    /**
+     * Drops the default HTTP client, so that the next request builds one with the current settings.
+     */
+    private function resetDefaultClient(): void
+    {
+        if (self::$defaultClients !== null) {
+            unset(self::$defaultClients[$this]);
+        }
+    }
+
+    /**
      * Creates the default Guzzle HTTP client with configured settings.
      *
      * @return ClientInterface
+     * @throws RequestException when the instance URL cannot be parsed
      */
     private function createDefaultClient(): ClientInterface
     {
-        $instance = new Uri((string)self::normalizeUrl($this->baseUrl));
+        try {
+            $instance = new Uri((string)self::normalizeUrl($this->baseUrl));
+        } catch (\InvalidArgumentException $invalidUrl) {
+            // The message would quote the URL, which is not needed to find the mistake
+            throw new RequestException('The instance URL is not a valid URL.');
+        }
+        if (!$this->verifySsl || strcasecmp($instance->getScheme(), 'https') !== 0) {
+            $this->logger?->warning('The connection to the Daktela API is not secure', [
+                'https' => strcasecmp($instance->getScheme(), 'https') === 0,
+                'verify_ssl' => $this->verifySsl,
+            ]);
+        }
         $handler = HandlerStack::create();
         // Guzzle removes the Authorization header once a redirect leaves the origin, but not X-AUTH-TOKEN.
         // Every hop is built from the request that still carries the token, so the hops share a state object:
@@ -1209,11 +1365,12 @@ class ApiCommunicator
     /**
      * The HTTP request timeout that should be used when communicating with the associated API.
      * @param float $requestTimeout Timeout of the HTTP request
-     * @noinspection PhpPhpUnused
+     * @noinspection PhpUnused
      */
     public function setRequestTimeout(float $requestTimeout): void
     {
         $this->requestTimeout = $requestTimeout;
+        $this->resetDefaultClient();
     }
 
     /**
@@ -1227,12 +1384,12 @@ class ApiCommunicator
             return null;
         }
 
-        /** @noinspection HttpUrlsUsage */
-        if ((mb_substr($url, 0, 7) != "http://") && (mb_substr($url, 0, 8) != "https://")) {
+        // The scheme is not case-sensitive: `HTTPS://host` must not become `https://HTTPS://host`
+        if (preg_match('#^https?://#i', $url) !== 1) {
             $url = "https://" . $url;
         }
-        if (mb_substr($url, -1) == "/") {
-            $url = mb_substr($url, 0, -1);
+        if (substr($url, -1) === "/") {
+            $url = substr($url, 0, -1);
         }
 
         return $url;
@@ -1262,6 +1419,7 @@ class ApiCommunicator
     public function setVerifySsl(bool $verify): self
     {
         $this->verifySsl = $verify;
+        $this->resetDefaultClient();
         return $this;
     }
 

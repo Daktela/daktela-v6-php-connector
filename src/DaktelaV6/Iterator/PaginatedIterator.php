@@ -43,6 +43,7 @@ class PaginatedIterator implements IteratorAggregate
      * @param int|null $maxItems Maximum items to return (null for unlimited)
      * @param bool $stopOnError Whether to stop on first error. When false, error pages are skipped
      *     only while the API-reported total shows that more records follow.
+     * @throws \InvalidArgumentException when the page size is less than 1
      */
     public function __construct(
         Client $client,
@@ -51,8 +52,14 @@ class PaginatedIterator implements IteratorAggregate
         ?int $maxItems = null,
         bool $stopOnError = true
     ) {
+        if ($pageSize < 1) {
+            // The offset would not advance: the same page would be read again and again
+            throw new \InvalidArgumentException('The page size must be at least 1');
+        }
         $this->client = $client;
         $this->baseRequest = clone $baseRequest;
+        // A response stored on the request with setResponse() would be returned for every page
+        $this->baseRequest->setExecuted(false);
         $this->pageSize = $pageSize;
         $this->maxItems = $maxItems;
         $this->stopOnError = $stopOnError;
@@ -146,7 +153,8 @@ class PaginatedIterator implements IteratorAggregate
             }
 
             $data = $response->getData();
-            if (!is_array($data)
+            if (
+                !is_array($data)
                 || $this->isLastPage($response, $offset, count($data))
             ) {
                 return;

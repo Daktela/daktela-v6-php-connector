@@ -1,45 +1,81 @@
 <?php
 
-namespace DaktelaV6\Request;
+declare(strict_types=1);
+
+namespace Daktela\Tests\Integration\Request;
 
 use Daktela\DaktelaV6\Client;
+use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Request\CreateRequest;
 use Daktela\DaktelaV6\Request\DeleteRequest;
 use Daktela\DaktelaV6\Request\ReadRequest;
 use Daktela\DaktelaV6\Request\UpdateRequest;
-use PHPUnit\Framework\SkippedTestSuiteError;
+use Daktela\DaktelaV6\Response\Response;
 use PHPUnit\Framework\TestCase;
 
+/**
+ * Creates, reads, updates, and deletes CampaignsRecords on a real Daktela instance set by the INSTANCE,
+ * ACCESS_TOKEN, and RECORD_TYPE (a queue of campaign records) environment variables. The tests are skipped
+ * when one of them is empty. Every record a test creates is deleted after the test.
+ */
 class ApiRequestTest extends TestCase
 {
-    private $hash;
-    private $url;
-    private $accessToken;
-    private $recordType;
+    private string $hash;
+    private string $url;
+    private string $accessToken;
+    private string $recordType;
+    /** @var string[] names of the records created by the current test */
+    private array $createdRecords = [];
 
-    public function setUp(): void
+    protected function setUp(): void
     {
         parent::setUp();
 
         $this->hash = md5(uniqid());
-        $this->url = getenv("INSTANCE");
-        $this->accessToken = getenv("ACCESS_TOKEN");
-        $this->recordType = getenv("RECORD_TYPE");
+        $this->url = (string)getenv("INSTANCE");
+        $this->accessToken = (string)getenv("ACCESS_TOKEN");
+        $this->recordType = (string)getenv("RECORD_TYPE");
+        $this->createdRecords = [];
 
-        if (empty($this->url) || empty($this->accessToken) || empty($this->recordType)) {
-            throw new SkippedTestSuiteError('Missing URL or Access token in phpunit.xml');
+        if ($this->url === '' || $this->accessToken === '' || $this->recordType === '') {
+            $this->markTestSkipped('Set INSTANCE, ACCESS_TOKEN and RECORD_TYPE to run the integration tests');
         }
+    }
+
+    protected function tearDown(): void
+    {
+        foreach ($this->createdRecords as $name) {
+            try {
+                $request = new DeleteRequest("CampaignsRecords");
+                $request->setObjectName($name);
+                (new Client($this->url, $this->accessToken))->execute($request);
+            } catch (RequestException $ex) {
+                // Already deleted by the test, or the instance is unreachable: nothing more to clean up
+            }
+        }
+        $this->createdRecords = [];
+
+        parent::tearDown();
+    }
+
+    /**
+     * Creates a campaign record that tearDown() deletes.
+     */
+    private function createRecord(Client $client, string $name): Response
+    {
+        $request = new CreateRequest("CampaignsRecords");
+        $request->addStringAttribute("name", $name)
+            ->addStringAttribute("number", "+420111222333")
+            ->addAttributes(["action" => 5, "queue" => $this->recordType]);
+        $this->createdRecords[] = $name;
+
+        return $client->execute($request);
     }
 
     public function testCreateRequest()
     {
         $client = new Client($this->url, $this->accessToken);
-        $request = new CreateRequest("CampaignsRecords");
-
-        $request->addStringAttribute("name", "test_create_" . $this->hash);
-        $request->addStringAttribute("number", "+420111222333");
-        $request->addAttributes(["action" => 5, "queue" => $this->recordType]);
-        $response = $client->execute($request);
+        $response = $this->createRecord($client, "test_create_" . $this->hash);
         self::assertNotNull($response->getData());
         self::assertEquals(201, $response->getHttpStatus());
         self::assertTrue(property_exists($response->getData(), 'name'));
@@ -52,12 +88,7 @@ class ApiRequestTest extends TestCase
     public function testReadMultipleRequest()
     {
         $client = new Client($this->url, $this->accessToken);
-        $request = new CreateRequest("CampaignsRecords");
-
-        $request->addStringAttribute("name", "test_read1_" . $this->hash);
-        $request->addStringAttribute("number", "+420111222333");
-        $request->addAttributes(["action" => 5, "queue" => $this->recordType]);
-        $response = $client->execute($request);
+        $response = $this->createRecord($client, "test_read1_" . $this->hash);
         self::assertEquals(201, $response->getHttpStatus());
 
         $requestRead = new ReadRequest("CampaignsRecords");
@@ -68,7 +99,7 @@ class ApiRequestTest extends TestCase
         self::assertNotEmpty($responseRead->getData());
         self::assertEmpty($responseRead->getErrors());
         self::assertEquals(200, $responseRead->getHttpStatus());
-        self::assertGreaterThan(0, $responseRead->getData());
+        self::assertGreaterThan(0, count($responseRead->getData()));
         self::assertArrayHasKey(0, $responseRead->getData());
         self::assertTrue(property_exists($responseRead->getData()[0], 'name'));
         self::assertEquals("test_read1_" . $this->hash, $responseRead->getData()[0]->name);
@@ -77,12 +108,7 @@ class ApiRequestTest extends TestCase
     public function testReadAllRequest()
     {
         $client = new Client($this->url, $this->accessToken);
-        $request = new CreateRequest("CampaignsRecords");
-
-        $request->addStringAttribute("name", "test_read3_" . $this->hash);
-        $request->addStringAttribute("number", "+420111222333");
-        $request->addAttributes(["action" => 5, "queue" => $this->recordType]);
-        $response = $client->execute($request);
+        $response = $this->createRecord($client, "test_read3_" . $this->hash);
         self::assertEquals(201, $response->getHttpStatus());
 
         $requestRead = new ReadRequest("CampaignsRecords");
@@ -94,7 +120,7 @@ class ApiRequestTest extends TestCase
         self::assertNotEmpty($responseRead->getData());
         self::assertEmpty($responseRead->getErrors());
         self::assertEquals(200, $responseRead->getHttpStatus());
-        self::assertGreaterThan(0, $responseRead->getData());
+        self::assertGreaterThan(0, count($responseRead->getData()));
         self::assertArrayHasKey(0, $responseRead->getData());
         self::assertTrue(property_exists($responseRead->getData()[0], 'name'));
         self::assertEquals("test_read3_" . $this->hash, $responseRead->getData()[0]->name);
@@ -103,12 +129,7 @@ class ApiRequestTest extends TestCase
     public function testReadSingleRequest()
     {
         $client = new Client($this->url, $this->accessToken);
-        $request = new CreateRequest("CampaignsRecords");
-
-        $request->addStringAttribute("name", "test_read2_" . $this->hash);
-        $request->addStringAttribute("number", "+420111222333");
-        $request->addAttributes(["action" => 5, "queue" => $this->recordType]);
-        $response = $client->execute($request);
+        $response = $this->createRecord($client, "test_read2_" . $this->hash);
         self::assertEquals(201, $response->getHttpStatus());
 
         $requestRead = new ReadRequest("CampaignsRecords");
@@ -127,11 +148,7 @@ class ApiRequestTest extends TestCase
     public function testUpdateRequest()
     {
         $client = new Client($this->url, $this->accessToken);
-        $request = new CreateRequest("CampaignsRecords");
-        $request->addStringAttribute("name", "test_update_" . $this->hash)
-            ->addStringAttribute("number", "+420111222333")
-            ->addAttributes(["action" => 5, "queue" => $this->recordType]);
-        $response = $client->execute($request);
+        $response = $this->createRecord($client, "test_update_" . $this->hash);
         self::assertEquals(201, $response->getHttpStatus());
 
         $request = new UpdateRequest("CampaignsRecords");
@@ -151,11 +168,7 @@ class ApiRequestTest extends TestCase
     public function testDeleteRequest()
     {
         $client = new Client($this->url, $this->accessToken);
-        $request = new CreateRequest("CampaignsRecords");
-        $request->addStringAttribute("name", "test_delete_" . $this->hash)
-            ->addStringAttribute("number", "+420111222333")
-            ->addAttributes(["action" => 5, "queue" => $this->recordType]);
-        $response = $client->execute($request);
+        $response = $this->createRecord($client, "test_delete_" . $this->hash);
         self::assertEquals(201, $response->getHttpStatus());
 
         $request = new DeleteRequest("CampaignsRecords");
@@ -166,27 +179,23 @@ class ApiRequestTest extends TestCase
         self::assertEmpty($response->getErrors());
     }
 
-  public function testReadRequestWithSingleFilterWithArrayAsValue()
-  {
-    $client = new Client($this->url, $this->accessToken);
-    $request = new CreateRequest("CampaignsRecords");
-    $request->addStringAttribute("name", "test_single_filter_array_" . $this->hash)
-      ->addStringAttribute("number", "+420111222333")
-      ->addAttributes(["action" => 5, "queue" => $this->recordType]);
-    $response = $client->execute($request);
-    self::assertEquals(201, $response->getHttpStatus());
+    public function testReadRequestWithSingleFilterWithArrayAsValue()
+    {
+        $client = new Client($this->url, $this->accessToken);
+        $response = $this->createRecord($client, "test_single_filter_array_" . $this->hash);
+        self::assertEquals(201, $response->getHttpStatus());
 
-    $requestRead = new ReadRequest("CampaignsRecords");
-    $requestRead->setRequestType(ReadRequest::TYPE_ALL);
-    $requestRead->addFilter("action", "in", [3, 4, 5]);
-    $requestRead->addFilter("name", "contains", "test_single_filter_array_");
-    $responseRead = $client->execute($requestRead);
-    self::assertEquals(200, $responseRead->getHttpStatus());
-    self::assertNotNull($responseRead->getData());
-    self::assertNotEmpty($responseRead->getData());
-    self::assertEmpty($responseRead->getErrors());
-    self::assertTrue($responseRead->getTotal() > 0);
-    self::assertTrue(property_exists($responseRead->getData()[0], 'name'));
-    self::assertEquals("test_single_filter_array_" . $this->hash, $responseRead->getData()[0]->name);
-  }
+        $requestRead = new ReadRequest("CampaignsRecords");
+        $requestRead->setRequestType(ReadRequest::TYPE_ALL);
+        $requestRead->addFilter("action", "in", [3, 4, 5]);
+        $requestRead->addFilter("name", "eq", "test_single_filter_array_" . $this->hash);
+        $responseRead = $client->execute($requestRead);
+        self::assertEquals(200, $responseRead->getHttpStatus());
+        self::assertNotNull($responseRead->getData());
+        self::assertNotEmpty($responseRead->getData());
+        self::assertEmpty($responseRead->getErrors());
+        self::assertTrue($responseRead->getTotal() > 0);
+        self::assertTrue(property_exists($responseRead->getData()[0], 'name'));
+        self::assertEquals("test_single_filter_array_" . $this->hash, $responseRead->getData()[0]->name);
+    }
 }

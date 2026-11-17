@@ -4,6 +4,62 @@ All notable changes to this project are documented in this file. The project fol
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-11-17
+
+This release fixes the findings of a review of the whole library. No public method signatures were changed. Read the Changed section before upgrading: a few calls that used to return wrong data or never finish now throw.
+
+### Security
+
+- Documented that `login()` with a token store does not check the password while the store holds a valid session of the user: it compares only the user name and the instance. The README said that one store "can be shared safely", which was wrong for an application that signs its own users in with their Daktela credentials and lets the user name select the stored session: any password was then accepted. To check a password, call `login()` without a store.
+- Rebuilt the error response to a login from its decoded JSON, redacted value by value, and left out a body that is not JSON, also on a redirect response. A string that contains the password once its HTML entities or percent-encoding are decoded is replaced as a whole. The password was redacted only in its raw, URL-encoded, and default JSON-encoded forms, so a server or proxy that echoed it with other escapes, such as `&` for `&` or HTML entities, left it in `getResponseBody()`, the exception message, and the `API request failed` log entry.
+- Built the payload of login and refresh requests where the request is created, so the password and the refresh token are no longer an argument of a connector frame. A logger or error tracker that records `debug_backtrace()` with arguments saw them while the request was sent.
+- Stopped an instance URL whose path starts with `//`, such as `https://example.daktela.com//other.host` or `https://example.daktela.com//api/v6`, from sending requests to another host (`other.host`, or `api`). The path became a network-path request target, so the Bearer token, the query parameter token, and login credentials went to that host. This matters when the instance URL comes from configuration that only checks its host. A request whose target names a host of its own is refused with a `RequestException`.
+- Wrapped an `\Error` thrown by a custom HTTP client or its middleware, such as a `TypeError`, in a `RequestException`. Only exceptions were wrapped, so an error reached the caller with the request, which carries the access token, in its trace.
+- Rejected model names containing a literal `?` or `#`, or a NUL byte, also percent-encoded, with a `RequestException`. A model name taken from user input could add query parameters, such as a second `accessToken`, or cut off the query. A percent-encoded `?` or `#` stays part of the path and is accepted as before.
+- Logged a warning when the default HTTP client is created for an `http://` instance or with SSL verification disabled.
+- Marked the access token parameters of the `Client` and `ApiCommunicator` constructors and `getInstance()` with `#[\SensitiveParameter]`.
+- CI: read-only token permissions, actions pinned to commits, and no credentials left in the checkout.
+
+### Fixed
+
+- `Response::getFirstError()` returned `null` for errors the API reports as a map, such as `{"error":{"title":"required"}}` for a form error, although `hasErrors()` was `true`. It returns the first entry whatever its key.
+- A list response with `"data": null`, as on an error page, returned the whole `{data, total}` envelope from `getData()`, so `isEmpty()` was `false` and a loop over the data iterated the envelope. `getData()` is `null` now. A result whose `data` is `null` is treated as a list only when it also has a `total` field; a single record with a `data` field of its own is otherwise returned as before.
+- `Client::iterate()` with a request that carries a stored response (`setResponse()` and `setExecuted(true)`) returned that response for every page, and could loop forever.
+- An instance URL that Guzzle cannot parse, such as one with port 99999, threw Guzzle's `MalformedUriException` from requests of the default HTTP client, and `ping()` and `healthCheck()` threw instead of reporting an unhealthy API. A `RequestException` is thrown and the health check returns `healthy: false`.
+- `ApiCommunicator::normalizeUrl()` treated the scheme as case-sensitive: `HTTPS://host` became `https://HTTPS://host`.
+- The query string was built with the `arg_separator.output` ini setting, so a host that sets it to `&amp;` sent a broken query.
+- `RetryConfig::getDelayForAttempt()` returned a negative delay for negative settings, which made the retry fail with a `ValueError`, and overflowed for very large attempt numbers. `RateLimitConfig::parseRetryAfter()` returned a negative `defaultWaitSeconds` as it was. Both are never negative now.
+- `addFilterFromArray()` did not convert the `[field, operator, null]` shorthand, so it was sent as a list instead of a filter.
+
+### Changed
+
+- **Reading all records with a `take` below 1 throws a `RequestException`**, and `Client::iterate()` and `PaginatedIterator` throw an `InvalidArgumentException` for a page size below 1. The offset did not advance: the read returned duplicates or sent 999 requests, and the iterator could loop forever.
+- **A read request with a relation but no object name throws a `RequestException`.** The relation was dropped silently and the request read the records of the model, e.g. all tickets instead of the activities of one ticket.
+- The default Guzzle client is created once per `ApiCommunicator` and reused, instead of once per request, so connections are kept alive between requests and between the pages of a paginated read. It is created again after `setRequestTimeout()` or `setVerifySsl()`, and in a forked process, which must not share the open connections of its parent.
+- `Response::getFirstError()` returns the first entry of an error map, which may be an array or an object rather than a string. It returned `null` for such errors.
+- An `\Error` thrown by a custom HTTP client or its middleware reaches the caller as a `RequestException`; the `API request failed` log entry names its class.
+- Properties are typed. An object created without its constructor, such as a mock with `disableOriginalConstructor()` or a subclass that does not call `parent::__construct()`, throws an `Error` from getters such as `Client::getApiCommunicator()` and `Response::getData()`, which returned `null`.
+- The `Sending API request` log entry reports `has_body: true` for login and refresh requests.
+- Reading all records appends each page to one array instead of copying all records read so far for every page.
+- Declared `psr/http-message` as a dependency. Guzzle's PSR-7 package already required it.
+
+### Deprecated
+
+- `ARequest::setExecuted()`, `isExecuted()`, `setResponse()`, and `getResponse()`. The connector never sets them; they only let a caller make `Client::execute()` return a stored response. They will be removed in 3.0.0.
+
+### Documentation
+
+- Corrected the install constraint in the README, which still said `^2.5`.
+- Replaced the realistic-looking example token in the README with a placeholder.
+- Noted that `setSkipErrorRequests(true)` and `stopOnError: false` skip only error pages answered with HTTP 2xx: an HTTP 4xx or 5xx response throws, and the errors of skipped pages are not kept.
+
+### Development
+
+- Added `composer check`, which runs `composer validate`, the coding standard, PHPStan, and the tests, as CI does.
+- Added a PSR-12 ruleset (`phpcs.xml.dist`) and a CI job for it; PHP_CodeSniffer was installed but never run.
+- PHPUnit fails on warnings and risky tests.
+- Moved the live API tests from `tests/DaktelaV6` to `tests/Integration`. They delete the records they create.
+
 ## [2.9.1] - 2026-11-15
 
 ### Security
@@ -173,7 +229,8 @@ Public methods only gained optional parameters, and `ARequest::getResponse()` wi
 
 No public method signatures were changed in this release. The dependency minimums in the Security section are the only compatibility-sensitive upgrade requirement.
 
-[Unreleased]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.9.1...HEAD
+[Unreleased]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.10.0...HEAD
+[2.10.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.9.1...2.10.0
 [2.9.1]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.9.0...2.9.1
 [2.9.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.8.0...2.9.0
 [2.8.0]: https://github.com/Daktela/daktela-v6-php-connector/compare/2.7.1...2.8.0

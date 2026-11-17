@@ -347,4 +347,52 @@ class ReadRequestTest extends TestCase
         $this->assertSame('or', $filters['filters'][1]['logic']);
         $this->assertSame('d', $filters['filters'][1]['filters'][1]['field']);
     }
+
+    public function testShorthandFilterWithNullValueIsNormalized(): void
+    {
+        $request = new ReadRequest('Users');
+        $request->addFilterFromArray([['deleted', 'isnull', null], ['name', 'eq', 'John']]);
+
+        $this->assertSame(
+            [
+                ['field' => 'deleted', 'operator' => 'isnull', 'value' => null],
+                ['field' => 'name', 'operator' => 'eq', 'value' => 'John'],
+            ],
+            $request->getFilters()['filters']
+        );
+    }
+    public function testAddFilterFromArrayWithShorthandArrayValue(): void
+    {
+        $request = new ReadRequest('Users');
+        $request->addFilterFromArray([['type', 'in', ['SMS', 'EMAIL', 'CALL']]]);
+
+        $this->assertEquals(
+            ['logic' => 'and', 'filters' => [['field' => 'type', 'operator' => 'in', 'value' => ['SMS', 'EMAIL', 'CALL']]]],
+            $request->getFilters()
+        );
+    }
+
+    public function testAddFilterCombinedWithAddFilterFromArray(): void
+    {
+        $request = new ReadRequest('Users');
+        $request->addFilter('edited', 'lte', '2020-11-30 23:59:59');
+        $request->addFilter('action', 'eq', '0');
+        $request->addFilterFromArray([
+            ['field' => 'created', 'operator' => 'lte', 'value' => '2020-11-30 23:59:59'],
+            ['user', 'isnull', ''],
+        ]);
+
+        $this->assertEquals(
+            [
+                'logic' => 'and',
+                'filters' => [
+                    ['field' => 'edited', 'operator' => 'lte', 'value' => '2020-11-30 23:59:59'],
+                    ['field' => 'action', 'operator' => 'eq', 'value' => '0'],
+                    ['field' => 'created', 'operator' => 'lte', 'value' => '2020-11-30 23:59:59'],
+                    ['field' => 'user', 'operator' => 'isnull', 'value' => ''],
+                ],
+            ],
+            $request->getFilters()
+        );
+    }
 }

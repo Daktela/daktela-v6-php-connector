@@ -122,4 +122,20 @@ class RetryConfigTest extends TestCase
         $this->assertEquals(30000, $config->getMaxDelayMs());
         $this->assertEquals(2.5, $config->getMultiplier());
     }
+
+    public function testDelayIsNeverNegative(): void
+    {
+        $config = new RetryConfig(baseDelayMs: -100, maxDelayMs: 1000);
+
+        $this->assertSame(0, $config->getDelayForAttempt(0));
+        $this->assertSame(0, $config->getDelayForAttempt(3));
+    }
+
+    public function testDelayOfAVeryLargeAttemptIsCappedInsteadOfOverflowing(): void
+    {
+        $config = new RetryConfig(baseDelayMs: 100, maxDelayMs: 10000, multiplier: 2.0);
+
+        $this->assertSame(10000, $config->getDelayForAttempt(64));
+        $this->assertSame(10000, $config->getDelayForAttempt(5000));
+    }
 }

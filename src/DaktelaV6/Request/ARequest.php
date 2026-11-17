@@ -14,13 +14,13 @@ use Daktela\DaktelaV6\Response\Response;
 abstract class ARequest
 {
     /** @var string name of the API model of the request */
-    private $model;
+    private string $model;
     /** @var bool variable used for flagging the request as already executed */
-    private $executed = false;
+    private bool $executed = false;
     /** @var Response|null cached response of the request */
-    private $response = null;
+    private ?Response $response = null;
     /** @var array additional query params that should be sent as part of the HTTP request */
-    private $additionalQueryParameters = [];
+    private array $additionalQueryParameters = [];
 
     /**
      * ARequest constructor.
@@ -32,8 +32,9 @@ abstract class ARequest
     }
 
     /**
-     * Checks if the request has already been executed.
+     * Checks if the request has been flagged as executed with setExecuted(). The client does not set the flag.
      * @return bool boolean value if the request has already been executed
+     * @deprecated since 2.10.0, will be removed in 3.0.0 together with the stored response
      */
     public function isExecuted(): bool
     {
@@ -41,8 +42,10 @@ abstract class ARequest
     }
 
     /**
-     * Sets the request as already executed or not.
+     * Sets the request as already executed or not. Client::execute() returns the response stored with
+     * setResponse() for a request flagged this way instead of sending it.
      * @param bool $executed boolean value if the request has already been executed
+     * @deprecated since 2.10.0, will be removed in 3.0.0: keep the response in your own code instead
      * @noinspection PhpUnused
      */
     public function setExecuted(bool $executed)
@@ -53,6 +56,7 @@ abstract class ARequest
     /**
      * Sets the response of the request.
      * @param Response $response response of the request
+     * @deprecated since 2.10.0, will be removed in 3.0.0: keep the response in your own code instead
      * @noinspection PhpUnused
      */
     public function setResponse(Response $response)
@@ -63,6 +67,7 @@ abstract class ARequest
     /**
      * Returns the response of the request.
      * @return Response|null response of the request, or null when none has been stored
+     * @deprecated since 2.10.0, will be removed in 3.0.0: keep the response in your own code instead
      */
     public function getResponse(): ?Response
     {

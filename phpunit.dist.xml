@@ -4,13 +4,15 @@
          bootstrap="vendor/autoload.php"
          colors="true"
          stopOnFailure="false"
+         failOnWarning="true"
+         failOnRisky="true"
          cacheResultFile=".phpunit.cache/test-results">
     <testsuites>
         <testsuite name="Unit">
             <directory>tests/Unit</directory>
         </testsuite>
         <testsuite name="Integration">
-            <directory>tests/DaktelaV6</directory>
+            <directory>tests/Integration</directory>
         </testsuite>
     </testsuites>
     <coverage processUncoveredFiles="true">

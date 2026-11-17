@@ -47,8 +47,7 @@ final class TokenSet
         #[\SensitiveParameter] string $accessToken,
         #[\SensitiveParameter] string $refreshToken,
         ?string $owner = null
-    ): self
-    {
+    ): self {
         return new self($accessToken, $refreshToken, self::expiry($accessToken), self::expiry($refreshToken), $owner);
     }
 

@@ -667,4 +667,5 @@ class ClientTest extends TestCase
         $this->assertSame(5, $response->getTotal());
         $this->assertSame(200, $response->getHttpStatus());
         $this->assertSame([], $response->getErrors());
-    }}
+    }
+}

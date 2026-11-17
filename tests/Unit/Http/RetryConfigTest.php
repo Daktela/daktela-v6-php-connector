@@ -137,4 +137,5 @@ class RetryConfigTest extends TestCase
 
         $this->assertSame(10000, $config->getDelayForAttempt(64));
         $this->assertSame(10000, $config->getDelayForAttempt(5000));
-    }}
+    }
+}

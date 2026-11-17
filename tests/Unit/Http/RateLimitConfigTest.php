@@ -108,4 +108,5 @@ class RateLimitConfigTest extends TestCase
 
         $this->assertSame(0, $config->parseRetryAfter(null));
         $this->assertSame(0, $config->parseRetryAfter('not a date'));
-    }}
+    }
+}

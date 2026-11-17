@@ -211,4 +211,5 @@ class ResponseTest extends TestCase
         $response = new Response(null, 0, [2 => 'second', 5 => 'fifth'], 400);
 
         $this->assertSame('second', $response->getFirstError());
-    }}
+    }
+}

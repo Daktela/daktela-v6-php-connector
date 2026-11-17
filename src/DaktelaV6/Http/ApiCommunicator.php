@@ -38,12 +38,12 @@ use Throwable;
 class ApiCommunicator
 {
     /** @var int Authentication method using HTTP header X-AUTH-TOKEN (default; legacy in the Daktela API docs) */
-    const AUTHENTICATION_METHOD_HEADER = 1;
+    public const AUTHENTICATION_METHOD_HEADER = 1;
     /** @var int Authentication method using query parameter accessToken */
-    const AUTHENTICATION_METHOD_QUERY = 2;
+    public const AUTHENTICATION_METHOD_QUERY = 2;
     /** @var int Authentication method using HTTP header Authorization: Bearer (Daktela 31.37.0, 32.36.0, 33.14.0 and later) */
-    const AUTHENTICATION_METHOD_BEARER = 3;
-    
+    public const AUTHENTICATION_METHOD_BEARER = 3;
+
     /** @var string Constant defining the base API URL */
     private const API_NAMESPACE = "/api/v6/";
     /** @var string Constant defining the User-Agent of the HTTP requests */
@@ -564,7 +564,8 @@ class ApiCommunicator
 
                 // A timeout may happen after the server received the request, so only
                 // idempotent requests (or explicitly allowed ones) are repeated then.
-                if ($this->retryConfig === null
+                if (
+                    $this->retryConfig === null
                     || !$this->retryConfig->shouldRetryOnConnectionError()
                     || (!$canRetryAfterSend && !$this->failedBeforeSend($ex, $request))
                 ) {
@@ -576,7 +577,6 @@ class ApiCommunicator
                 }
                 $applyRetryDelay = true;
                 continue;
-
             } catch (Throwable $ex) {
                 // Any other client exception, e.g. an invalid redirect URL or one of a custom HTTP client, and
                 // errors such as a TypeError of a custom middleware, whose trace holds the request with the token
@@ -601,7 +601,8 @@ class ApiCommunicator
                 continue;
             }
 
-            if ($this->retryConfig !== null
+            if (
+                $this->retryConfig !== null
                 && $canRetryAfterSend
                 && $attempt < $maxAttempts - 1
                 && $this->retryConfig->isRetryableStatus($statusCode)
@@ -1050,7 +1051,8 @@ class ApiCommunicator
         ]);
 
         // If no rate limit config or auto-retry disabled, throw exception
-        if ($this->rateLimitConfig === null
+        if (
+            $this->rateLimitConfig === null
             || !$this->rateLimitConfig->shouldAutoRetry()
             || !$canRetry
         ) {
@@ -1095,7 +1097,8 @@ class ApiCommunicator
         }
         $headers = ["User-Agent" => $userAgent, "Content-Type" => "application/json"];
 
-        if ($authenticate
+        if (
+            $authenticate
             && $this->authenticationMethod !== self::AUTHENTICATION_METHOD_QUERY
             && preg_match('/[\x00-\x08\x0A-\x1F\x7F]/', $this->currentAccessToken()) === 1
         ) {

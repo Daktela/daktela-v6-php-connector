@@ -525,4 +525,5 @@ class PaginatedIteratorTest extends TestCase
         $ids = array_map(static fn ($item) => $item->id, $client->iterate($request, 2)->toArray());
 
         $this->assertSame([1, 2, 3], $ids);
-    }}
+    }
+}

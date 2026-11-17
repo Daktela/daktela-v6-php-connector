@@ -6,7 +6,6 @@ namespace Daktela\DaktelaV6\Request;
 
 class ARequestWithAttributes extends ARequest
 {
-
     /** @var array attributes of the create request */
     private $attributes = [];
 

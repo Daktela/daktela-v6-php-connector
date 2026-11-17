@@ -277,7 +277,8 @@ class ReadRequest extends ARequest
             return $this->normalizeFilterGroup($condition);
         }
 
-        if (count($condition) === 3
+        if (
+            count($condition) === 3
             && array_key_exists(0, $condition) && array_key_exists(1, $condition) && array_key_exists(2, $condition)
             && is_string($condition[0]) && is_string($condition[1])
             && (is_scalar($condition[2]) || is_array($condition[2]) || $condition[2] === null)

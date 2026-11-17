@@ -16,7 +16,6 @@ use Daktela\DaktelaV6\Request\UpdateRequest;
  */
 class RequestFactory
 {
-
     /**
      * Private RequestFactory constructor in order to disable creating instances.
      * @noinspection PhpUnused

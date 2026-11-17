@@ -153,7 +153,8 @@ class PaginatedIterator implements IteratorAggregate
             }
 
             $data = $response->getData();
-            if (!is_array($data)
+            if (
+                !is_array($data)
                 || $this->isLastPage($response, $offset, count($data))
             ) {
                 return;

@@ -6,7 +6,6 @@ namespace Daktela\DaktelaV6\Utils;
 
 class FormatHelper
 {
-
     /**
      * Private constructor so no instances are created.
      */

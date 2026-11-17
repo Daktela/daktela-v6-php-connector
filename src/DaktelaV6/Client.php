@@ -261,7 +261,8 @@ class Client
             $httpStatus = $currentResponse->getHttpStatus();
 
             //If returned less than take, it is the last page
-            if (count($currentData) < $request->getTake()
+            if (
+                count($currentData) < $request->getTake()
                 || ($total > 0 && $request->getSkip() + count($data) >= $total)
             ) {
                 return new Response($data, $total, $errors, $httpStatus);
@@ -348,7 +349,8 @@ class Client
         $endpoint = $this->validateModel($model);
         foreach ($segments as $segment) {
             $decoded = rawurldecode($segment);
-            if ($segment === ''
+            if (
+                $segment === ''
                 || $decoded === '.'
                 || $decoded === '..'
                 || strpbrk($decoded, "/\\\0") !== false

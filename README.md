@@ -7,13 +7,13 @@ Daktela V6 PHP Connector is a library that enables your PHP application to conne
 The connector requires PHP 8.0 or newer, the `mbstring` extension, and Guzzle 7 (7.15.2 or newer, with PSR-7 2.13 or newer) or Guzzle 8 (8.0.1 or newer, with PSR-7 3). Composer installs the Guzzle version that fits the other dependencies of your project. The recommended way to install it is through Composer:
 
 ```bash
-composer require daktela/daktela-v6-php-connector:^2.5
+composer require daktela/daktela-v6-php-connector:^2.10
 ```
 
 When upgrading an existing installation, Composer may need permission to update transitive dependencies:
 
 ```bash
-composer require daktela/daktela-v6-php-connector:^2.5 --with-all-dependencies
+composer require daktela/daktela-v6-php-connector:^2.10 --with-all-dependencies
 ```
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes and upgrade requirements.
@@ -61,7 +61,7 @@ use Daktela\DaktelaV6\Client;
 use Daktela\DaktelaV6\RequestFactory;
 
 $instance = "https://mydaktela.daktela.com/";
-$accessToken = "0b7cb37b6c2b96a4b68128b212c799056564e0f2";
+$accessToken = "your-access-token";
 
 $client = new Client($instance, $accessToken);
 $request = RequestFactory::buildReadRequest("Users")
@@ -76,7 +76,7 @@ use Daktela\DaktelaV6\Client;
 use Daktela\DaktelaV6\RequestFactory;
 
 $instance = "https://mydaktela.daktela.com/";
-$accessToken = "0b7cb37b6c2b96a4b68128b212c799056564e0f2";
+$accessToken = "your-access-token";
 
 $client = Client::getInstance($instance, $accessToken);
 $request = RequestFactory::buildReadRequest("Users")
@@ -150,7 +150,7 @@ $request = RequestFactory::buildReadRequest("CampaignsRecords")
 $response = $client->execute($request);
 ```
 
-When reading all records, the connector starts at the request's `setSkip()` offset and stops as soon as the API-reported total is reached, even when the last page is full. If the API does not report a total, it stops on a short or empty page. A safety limit caps this operation at 999 page requests; when the limit is reached before all records are read, the response contains the records read so far and an error saying the result is truncated. By default, an error page ends the operation and that response is returned. To continue past error pages, use `setSkipErrorRequests(true)`; error responses with non-array data are skipped:
+When reading all records, the connector starts at the request's `setSkip()` offset and stops as soon as the API-reported total is reached, even when the last page is full. If the API does not report a total, it stops on a short or empty page. A safety limit caps this operation at 999 page requests; when the limit is reached before all records are read, the response contains the records read so far and an error saying the result is truncated. By default, an error page ends the operation and that response is returned. To continue past error pages, use `setSkipErrorRequests(true)`; error responses with non-array data are skipped. Only pages the API answers with HTTP 2xx and an `error` member can be skipped: an HTTP 4xx or 5xx response throws a `RequestException`, and the records read so far are lost. The errors of skipped pages are not kept, so the result can be incomplete without saying so; compare the number of records with `getTotal()`. The `take` of the request must be at least 1:
 
 ```php
 $request = RequestFactory::buildReadRequest("CampaignsRecords")
@@ -223,7 +223,7 @@ $request = RequestFactory::buildDeleteRequest("CampaignsRecords")
 $response = $client->execute($request);
 ```
 
-Object names and relation names are URL-encoded as single path segments. Values that could address a different endpoint (empty values, `.` and `..`, also percent-encoded, and values containing `/`, `\`, or NUL) are rejected with a `RequestException`, as are model names containing dot segments.
+Object names and relation names are URL-encoded as single path segments. Values that could address a different endpoint (empty values, `.` and `..`, also percent-encoded, and values containing `/`, `\`, or NUL) are rejected with a `RequestException`, as are model names containing dot segments, `?`, `#`, or NUL. A relation set without an object name is rejected as well, because the request would read the records of the model instead.
 
 ## Processing response
 
@@ -312,7 +312,9 @@ $client = Client::login($instance, $username, $password, new FileTokenStore('/va
 ```
 
 - The password is kept in memory to log in again. The connector never stores it. It keeps the password and the tokens out of the traces of the exceptions it throws, and out of `var_dump()`, `print_r()`, `var_export()`, and `serialize()` output. An unserialized copy of a client has no login session.
-- Saved tokens record the user and instance they belong to. `login()` logs in again instead of using tokens of another user or instance, so one store can be shared safely. When the store fails to load, the connector logs a warning and logs in. When it fails to save, the connector logs a warning and keeps the tokens in memory.
+- Saved tokens record the user and instance they belong to. `login()` logs in again instead of using tokens of another user or instance. When the store fails to load, the connector logs a warning and logs in. When it fails to save, the connector logs a warning and keeps the tokens in memory.
+- While the store holds a valid session of the user, `login()` sends no login and **does not check the password**: it compares only the user name and the instance. Do not use `login()` with a token store to check the password of a person who signs in to your application, and do not let a caller choose which stored session is loaded, e.g. with a store keyed by a user name from a form. To check a password, call `login()` without a store, which always sends the login.
+- Call `login()` on a client of its own, as `Client::login()` does. On an `ApiCommunicator` shared through `getInstance()`, a login replaces the user for every holder of that object.
 - Refresh tokens are long-lived credentials. Store them as securely as passwords, and use an `https://` instance URL with SSL verification enabled.
 - After the server rejects the credentials, the connector sends no further login, which could lock the account, until `login()` is called again. Requests then fail with a `RequestException` that carries the HTTP status of the rejected login.
 - When the server rejects the access token with HTTP 401, the connector refreshes it and sends the request once more. The server answers 401 before it processes a request, so the request is not executed twice.
@@ -568,7 +570,7 @@ if ($iterator->hasStoppedOnError()) {
 }
 ```
 
-Set `stopOnError: false` to skip an error page and continue at the next offset. Error pages are skipped only while the API-reported total shows that more records follow; otherwise the iteration stops and the error response is available as above. For item iteration, a `maxItems` value of zero returns no items and sends no request; `pages()` is independent of that item limit.
+Set `stopOnError: false` to skip an error page and continue at the next offset. As with reading all records, only an HTTP 2xx response with an `error` member is an error page; an HTTP 4xx or 5xx response throws a `RequestException` out of the loop, and `hasStoppedOnError()` stays `false`. The page size must be at least 1; `iterate()` throws an `InvalidArgumentException` otherwise. Error pages are skipped only while the API-reported total shows that more records follow; otherwise the iteration stops and the error response is available as above. For item iteration, a `maxItems` value of zero returns no items and sends no request; `pages()` is independent of that item limit.
 
 Iterator helper methods start a new traversal each time. For example, calling `first()` and then `toArray()` performs separate API reads.
 
@@ -586,6 +588,7 @@ if ($response->isSuccess()) {
 
 // Check for errors
 if ($response->hasErrors()) {
+    // The first entry of the errors, which the API reports as a list or as a map such as ['title' => 'required']
     $firstError = $response->getFirstError();
 }
 
@@ -610,4 +613,10 @@ The full suite also contains live API integration tests, which are skipped unles
 - The health check tests need `INSTANCE`. The static token tests also need `ACCESS_TOKEN`, and the Bearer test requires Daktela 31.37.0, 32.36.0, 33.14.0, or later.
 - The login tests need `INSTANCE`, `LOGIN_USERNAME`, and `LOGIN_PASSWORD` of an account without two-factor authentication.
 
-CI tests supported PHP versions and enforces at least 90% line coverage for the deterministic unit suite.
+`composer check` runs what CI runs besides the version matrix: `composer validate`, the coding standard (PSR-12, `phpcs.xml.dist`), PHPStan, and the tests. Run it in the same container:
+
+```bash
+docker run --rm -v "$PWD:/app" -w /app composer:2 check
+```
+
+CI tests supported PHP versions with Guzzle 7 and Guzzle 8 and enforces at least 90% line coverage for the deterministic unit suite.

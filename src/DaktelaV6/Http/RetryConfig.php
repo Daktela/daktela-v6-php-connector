@@ -79,8 +79,10 @@ class RetryConfig
      */
     public function getDelayForAttempt(int $attempt): int
     {
-        $delay = (int)($this->baseDelayMs * pow($this->multiplier, $attempt));
-        return min($delay, $this->maxDelayMs);
+        // Compared as floats: the power overflows an integer for a large attempt number. Never negative.
+        $delay = min($this->baseDelayMs * pow($this->multiplier, $attempt), (float)$this->maxDelayMs);
+
+        return (int)max(0.0, $delay);
     }
 
     /**

@@ -6,10 +6,10 @@ namespace Daktela\DaktelaV6\Response;
 
 class Response
 {
-    private $data;
-    private $total;
-    private $errors;
-    private $httpStatus;
+    private mixed $data;
+    private int $total;
+    private array $errors;
+    private int $httpStatus;
 
     public function __construct($data, int $total, array $errors, int $httpStatus)
     {
@@ -72,13 +72,14 @@ class Response
     }
 
     /**
-     * Get the first error from the errors array.
+     * Get the first error from the errors array. The API reports errors as a list or as a map, e.g.
+     * `['title' => 'required']` for a form error; the first entry is returned in both cases.
      *
      * @return mixed|null First error or null if no errors
      */
     public function getFirstError(): mixed
     {
-        return $this->errors[0] ?? null;
+        return $this->errors === [] ? null : $this->errors[array_key_first($this->errors)];
     }
 
     /**

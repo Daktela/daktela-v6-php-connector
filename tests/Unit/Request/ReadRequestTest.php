@@ -347,4 +347,17 @@ class ReadRequestTest extends TestCase
         $this->assertSame('or', $filters['filters'][1]['logic']);
         $this->assertSame('d', $filters['filters'][1]['filters'][1]['field']);
     }
-}
+
+    public function testShorthandFilterWithNullValueIsNormalized(): void
+    {
+        $request = new ReadRequest('Users');
+        $request->addFilterFromArray([['deleted', 'isnull', null], ['name', 'eq', 'John']]);
+
+        $this->assertSame(
+            [
+                ['field' => 'deleted', 'operator' => 'isnull', 'value' => null],
+                ['field' => 'name', 'operator' => 'eq', 'value' => 'John'],
+            ],
+            $request->getFilters()['filters']
+        );
+    }}

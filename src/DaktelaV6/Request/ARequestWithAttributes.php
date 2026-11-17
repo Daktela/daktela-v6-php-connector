@@ -11,7 +11,7 @@ class ARequestWithAttributes extends ARequest
     private $attributes = [];
 
     /**
-     * Adds a string attribute to the request.
+     * Adds an attribute of any type to the request.
      * @param string $key key of the attribute to be added
      * @param mixed $value value of attribute to be added
      * @return $this current instance of the create request to be used as builder pattern

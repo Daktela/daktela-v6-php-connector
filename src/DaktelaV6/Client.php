@@ -34,11 +34,11 @@ use Daktela\DaktelaV6\Response\Response;
 class Client
 {
     /** @var array index of all singleton instances of Daktela client */
-    private static $singletons = [];
+    private static array $singletons = [];
     /** Maximum limit for reading all entities method */
     public const READ_LIMIT = 999;
     /** @var ApiCommunicator API communicator transport class corresponding the instance of client */
-    private $apiCommunicator;
+    private ApiCommunicator $apiCommunicator;
 
     /**
      * Client constructor.
@@ -50,8 +50,11 @@ class Client
      * @param ApiCommunicator|null $apiCommunicator dedicated transport, or null to use the shared one
      * @noinspection PhpUnused
      */
-    public function __construct(string $instance, string $accessToken, ?ApiCommunicator $apiCommunicator = null)
-    {
+    public function __construct(
+        string $instance,
+        #[\SensitiveParameter] string $accessToken,
+        ?ApiCommunicator $apiCommunicator = null
+    ) {
         $this->apiCommunicator = $apiCommunicator ?? ApiCommunicator::getInstance($instance, $accessToken);
     }
 
@@ -63,7 +66,8 @@ class Client
      * @param string $instance URL of the Daktela instance the client is connecting to
      * @param string $username name of the Daktela user
      * @param string $password password of the Daktela user
-     * @param TokenStore|null $tokenStore store that keeps the session tokens between processes, or null
+     * @param TokenStore|null $tokenStore store that keeps the session tokens between processes, or null. While it
+     *     holds a valid session of the user, no login is sent and the password is not checked.
      * @return Client client with a logged-in session
      * @throws RequestException when the login fails
      */
@@ -93,7 +97,7 @@ class Client
      * @return Client instance of the Daktela client class
      * @noinspection PhpUnused
      */
-    public static function getInstance(string $instance, string $accessToken): self
+    public static function getInstance(string $instance, #[\SensitiveParameter] string $accessToken): self
     {
         $key = hash('sha256', $instance . "\0" . $accessToken);
         if (!isset(self::$singletons[$key])) {
@@ -220,7 +224,14 @@ class Client
      */
     private function executeReadAll(ReadRequest $request): Response
     {
-        $response = new Response([], 0, [], 0);
+        if ($request->getTake() < 1) {
+            // The offset would not advance: the same page would be read again and again
+            throw new RequestException('The take of a request reading all records must be at least 1');
+        }
+        $data = [];
+        $total = 0;
+        $errors = [];
+        $httpStatus = 0;
         $endpoint = $this->buildReadEndpoint($request);
         for ($i = 0; $i < self::READ_LIMIT; $i++) {
             $queryParams = $this->buildReadQuery($request, $request->getSkip() + ($i * $request->getTake()));
@@ -241,31 +252,27 @@ class Client
                 continue;
             }
 
-            $data = array_merge($response->getData(), $currentData);
-            $response = new Response(
-                $data,
-                $currentResponse->getTotal(),
-                $currentResponse->getErrors(),
-                $currentResponse->getHttpStatus()
-            );
+            // Appended in place: merging into a new array for every page copies all records read so far
+            foreach ($currentData as $record) {
+                $data[] = $record;
+            }
+            $total = $currentResponse->getTotal();
+            $errors = $currentResponse->getErrors();
+            $httpStatus = $currentResponse->getHttpStatus();
 
             //If returned less than take, it is the last page
             if (count($currentData) < $request->getTake()
-                || ($currentResponse->getTotal() > 0
-                    && $request->getSkip() + count($data) >= $currentResponse->getTotal())
+                || ($total > 0 && $request->getSkip() + count($data) >= $total)
             ) {
-                return $response;
+                return new Response($data, $total, $errors, $httpStatus);
             }
         }
 
         return new Response(
-            $response->getData(),
-            $response->getTotal(),
-            array_merge(
-                $response->getErrors(),
-                ['Read limit of ' . self::READ_LIMIT . ' pages reached; the result is truncated']
-            ),
-            $response->getHttpStatus()
+            $data,
+            $total,
+            array_merge($errors, ['Read limit of ' . self::READ_LIMIT . ' pages reached; the result is truncated']),
+            $httpStatus
         );
     }
 
@@ -311,12 +318,17 @@ class Client
      * Builds the endpoint of a multiple-records read request (if relational data are read, read them).
      * @param ReadRequest $request read request
      * @return string API endpoint
-     * @throws RequestException the object name or relation is not a valid path segment
+     * @throws RequestException the object name or relation is not a valid path segment, or a relation is set
+     *     without the object it belongs to
      */
     private function buildReadEndpoint(ReadRequest $request): string
     {
         if (!is_null($request->getRelation()) && !is_null($request->getObjectName())) {
             return $this->buildEndpoint($request->getModel(), $request->getObjectName(), $request->getRelation());
+        }
+        if (!is_null($request->getRelation())) {
+            // Without the object, the request would read the records of the model instead of the relation
+            throw new RequestException('A relation needs an object name: call setObjectName() as well');
         }
 
         return $this->validateModel($request->getModel());
@@ -350,13 +362,17 @@ class Client
     }
 
     /**
-     * Validates that the model does not contain dot segments that would leave the API namespace.
+     * Validates that the model does not contain dot segments that would leave the API namespace, or a
+     * query string or fragment, which would add or cut off query parameters.
      * @param string $model API model
      * @return string validated API model
-     * @throws RequestException the model contains a dot segment
+     * @throws RequestException the model contains a dot segment, `?`, `#`, or a NUL byte
      */
     private function validateModel(string $model): string
     {
+        if (strpbrk(rawurldecode($model), "?#\0") !== false) {
+            throw new RequestException('Invalid model: ' . $model);
+        }
         foreach (preg_split('#[/\\\\]#', rawurldecode($model)) as $part) {
             if ($part === '.' || $part === '..') {
                 throw new RequestException('Invalid model: ' . $model);
@@ -387,8 +403,8 @@ class Client
 
     /**
      * Returns the API communicator assigned to the current Daktela V6 client instance.
-     * @return ApiCommunicator|null API communicator assigned to the current Daktela V6 client instance
-     * @noinspection PhpPhpUnused
+     * @return ApiCommunicator|null API communicator assigned to the current Daktela V6 client instance; never null
+     * @noinspection PhpUnused
      */
     public function getApiCommunicator(): ?ApiCommunicator
     {
@@ -434,6 +450,7 @@ class Client
      * @param int|null $maxItems Maximum items to return (null for unlimited)
      * @param bool $stopOnError Whether to stop iteration on first error (default: true)
      * @return PaginatedIterator
+     * @throws \InvalidArgumentException when the page size is less than 1
      */
     public function iterate(
         ReadRequest $request,

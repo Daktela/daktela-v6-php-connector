@@ -585,4 +585,86 @@ class ClientTest extends TestCase
         $this->assertCount(Client::READ_LIMIT, $response->getData());
         $this->assertFalse($response->hasErrors());
     }
-}
+
+    /**
+     * @dataProvider invalidTakes
+     */
+    public function testReadAllRejectsATakeBelowOne(int $take): void
+    {
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->never())->method('sendRequest');
+        $request = (new ReadRequest('Users'))->setRequestType(ReadRequest::TYPE_ALL)->setTake($take);
+
+        $this->expectException(RequestException::class);
+        $this->expectExceptionMessage('The take of a request reading all records must be at least 1');
+
+        $this->createClient($communicator)->execute($request);
+    }
+
+    public function invalidTakes(): array
+    {
+        return ['zero' => [0], 'negative' => [-1]];
+    }
+
+    /**
+     * @dataProvider multipleRecordTypes
+     */
+    public function testRelationWithoutObjectNameIsRejected(int $requestType): void
+    {
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->never())->method('sendRequest');
+        $request = (new ReadRequest('Tickets'))->setRequestType($requestType)->setRelation('activities');
+
+        $this->expectException(RequestException::class);
+        $this->expectExceptionMessage('A relation needs an object name');
+
+        $this->createClient($communicator)->execute($request);
+    }
+
+    public function multipleRecordTypes(): array
+    {
+        return ['multiple' => [ReadRequest::TYPE_MULTIPLE], 'all' => [ReadRequest::TYPE_ALL]];
+    }
+
+    /**
+     * @dataProvider modelsWithQueryOrFragment
+     */
+    public function testModelWithQueryOrFragmentIsRejected(string $model): void
+    {
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->never())->method('sendRequest');
+
+        $this->expectException(RequestException::class);
+        $this->expectExceptionMessage('Invalid model');
+
+        $this->createClient($communicator)->execute(new ReadRequest($model));
+    }
+
+    public function modelsWithQueryOrFragment(): array
+    {
+        return [
+            'query' => ['Users.json?accessToken=other&x='],
+            'encoded query' => ['Users%3FaccessToken=other'],
+            'fragment' => ['Users#'],
+            'encoded fragment' => ['Users%23'],
+            'NUL byte' => ["Users\0"],
+        ];
+    }
+
+    public function testReadAllCollectsThePagesInOrder(): void
+    {
+        $communicator = $this->createCommunicator();
+        $communicator->expects($this->exactly(3))->method('sendRequest')->willReturnOnConsecutiveCalls(
+            new Response([1, 2], 5, [], 200),
+            new Response([3, 4], 5, [], 200),
+            new Response([5], 5, [], 200)
+        );
+        $request = (new ReadRequest('Users'))->setRequestType(ReadRequest::TYPE_ALL)->setTake(2);
+
+        $response = $this->createClient($communicator)->execute($request);
+
+        $this->assertSame([1, 2, 3, 4, 5], $response->getData());
+        $this->assertSame(5, $response->getTotal());
+        $this->assertSame(200, $response->getHttpStatus());
+        $this->assertSame([], $response->getErrors());
+    }}

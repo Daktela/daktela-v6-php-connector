@@ -101,4 +101,11 @@ class RateLimitConfigTest extends TestCase
     {
         $this->assertSame(0, (new RateLimitConfig())->parseRetryAfter('-5'));
     }
-}
+
+    public function testNegativeDefaultWaitIsNotReturned(): void
+    {
+        $config = new RateLimitConfig(defaultWaitSeconds: -5);
+
+        $this->assertSame(0, $config->parseRetryAfter(null));
+        $this->assertSame(0, $config->parseRetryAfter('not a date'));
+    }}

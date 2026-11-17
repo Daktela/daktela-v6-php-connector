@@ -48,7 +48,7 @@ class RateLimitConfig
     public function parseRetryAfter(?string $headerValue): int
     {
         if ($headerValue === null || $headerValue === '') {
-            return $this->defaultWaitSeconds;
+            return max(0, $this->defaultWaitSeconds);
         }
 
         // Try parsing as integer seconds
@@ -62,6 +62,6 @@ class RateLimitConfig
             return max(0, $timestamp - time());
         }
 
-        return $this->defaultWaitSeconds;
+        return max(0, $this->defaultWaitSeconds);
     }
 }

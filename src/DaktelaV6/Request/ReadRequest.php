@@ -36,23 +36,23 @@ class ReadRequest extends ARequest
     /** @var int Constant defining the request should return all entities regardless of pagination */
     public const TYPE_ALL = 2;
     /** @var array Variable containing currently used filters */
-    private $filters = [];
+    private array $filters = [];
     /** @var array Variable containing currently used required fields */
-    private $fields = [];
+    private array $fields = [];
     /** @var array Variable containing currently used sort conditions */
-    private $sort = [];
+    private array $sort = [];
     /** @var int Variable containing current take limit of the request */
-    private $take = 100;
+    private int $take = 100;
     /** @var int Variable containing current skip offset of the request */
-    private $skip = 0;
+    private int $skip = 0;
     /** @var bool Variable determining whether error requests should be skipped when using the TYPE_ALL request type */
-    private $skipErrorRequests = false;
+    private bool $skipErrorRequests = false;
     /** @var string|null Variable containing the object to be returned when using the TYPE_SINGLE request type */
-    private $objectName = null;
+    private ?string $objectName = null;
     /** @var int Variable containing current type of the request */
-    private $requestType = self::TYPE_MULTIPLE;
+    private int $requestType = self::TYPE_MULTIPLE;
     /** @var string|null Variable containing the relation of the object to be returned when using the TYPE_MULTIPLE request type */
-    private $relation = null;
+    private ?string $relation = null;
 
     /**
      * Adds the filter to the current request type. Filters added this way are always
@@ -280,7 +280,7 @@ class ReadRequest extends ARequest
         if (count($condition) === 3
             && array_key_exists(0, $condition) && array_key_exists(1, $condition) && array_key_exists(2, $condition)
             && is_string($condition[0]) && is_string($condition[1])
-            && (is_scalar($condition[2]) || is_array($condition[2]))
+            && (is_scalar($condition[2]) || is_array($condition[2]) || $condition[2] === null)
         ) {
             return ['field' => $condition[0], 'operator' => $condition[1], 'value' => $condition[2]];
         }
@@ -302,7 +302,7 @@ class ReadRequest extends ARequest
 
     /**
      * Method for obtaining the object name to be read.
-     * @return string unique name of the object that is supposed to be read
+     * @return string|null unique name of the object that is supposed to be read
      */
     public function getObjectName(): ?string
     {
@@ -323,7 +323,7 @@ class ReadRequest extends ARequest
 
     /**
      * Method for obtaining the relation to be read on specific object.
-     * @return string name of the relation to be read
+     * @return string|null name of the relation to be read, or null when none is set
      */
     public function getRelation(): ?string
     {

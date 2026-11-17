@@ -197,4 +197,18 @@ class ResponseTest extends TestCase
 
         $this->assertFalse($response->isEmpty());
     }
-}
+
+    public function testGetFirstErrorReturnsFirstEntryOfAMap(): void
+    {
+        $response = new Response(null, 0, ['title' => 'required', 'name' => 'too long'], 400);
+
+        $this->assertTrue($response->hasErrors());
+        $this->assertSame('required', $response->getFirstError());
+    }
+
+    public function testGetFirstErrorReturnsFirstEntryOfAListThatDoesNotStartAtZero(): void
+    {
+        $response = new Response(null, 0, [2 => 'second', 5 => 'fifth'], 400);
+
+        $this->assertSame('second', $response->getFirstError());
+    }}

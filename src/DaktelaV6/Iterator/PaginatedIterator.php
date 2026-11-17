@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Daktela\DaktelaV6\Iterator;
 
 use Daktela\DaktelaV6\Client;
+use Daktela\DaktelaV6\Exception\InvalidRequestException;
 use Daktela\DaktelaV6\Request\ReadRequest;
 use Daktela\DaktelaV6\Response\Response;
 use Generator;
@@ -43,7 +44,7 @@ class PaginatedIterator implements IteratorAggregate
      * @param int|null $maxItems Maximum items to return (null for unlimited)
      * @param bool $stopOnError Whether to stop on first error. When false, error pages are skipped
      *     only while the API-reported total shows that more records follow.
-     * @throws \InvalidArgumentException when the page size is less than 1
+     * @throws InvalidRequestException when the page size is less than 1
      */
     public function __construct(
         Client $client,
@@ -54,12 +55,10 @@ class PaginatedIterator implements IteratorAggregate
     ) {
         if ($pageSize < 1) {
             // The offset would not advance: the same page would be read again and again
-            throw new \InvalidArgumentException('The page size must be at least 1');
+            throw new InvalidRequestException('The page size must be at least 1');
         }
         $this->client = $client;
         $this->baseRequest = clone $baseRequest;
-        // A response stored on the request with setResponse() would be returned for every page
-        $this->baseRequest->setExecuted(false);
         $this->pageSize = $pageSize;
         $this->maxItems = $maxItems;
         $this->stopOnError = $stopOnError;

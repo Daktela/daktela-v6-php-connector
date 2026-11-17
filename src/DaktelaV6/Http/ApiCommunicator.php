@@ -6,6 +6,7 @@ namespace Daktela\DaktelaV6\Http;
 
 use Daktela\DaktelaV6\Auth\LoginSession;
 use Daktela\DaktelaV6\Auth\TokenStore;
+use Daktela\DaktelaV6\Exception\InvalidRequestException;
 use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Http\Internal\Credentials;
 use Daktela\DaktelaV6\Http\Internal\DefaultClientFactory;
@@ -260,7 +261,7 @@ class ApiCommunicator
      * of its parent holds open connections, which two processes must not use at once.
      *
      * @return ClientInterface
-     * @throws RequestException when the instance URL cannot be parsed
+     * @throws InvalidRequestException when the instance URL cannot be parsed
      */
     private function defaultClient(): ClientInterface
     {
@@ -315,7 +316,7 @@ class ApiCommunicator
     {
         $methods = [self::AUTHENTICATION_METHOD_HEADER, self::AUTHENTICATION_METHOD_QUERY, self::AUTHENTICATION_METHOD_BEARER];
         if (!in_array($authenticationMethod, $methods, true)) {
-            throw new RequestException('Invalid authentication method');
+            throw new InvalidRequestException('Invalid authentication method');
         }
         $this->authenticationMethod = $authenticationMethod;
     }

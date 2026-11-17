@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Daktela\DaktelaV6;
 
 use Daktela\DaktelaV6\Auth\TokenStore;
+use Daktela\DaktelaV6\Exception\InvalidRequestException;
 use Daktela\DaktelaV6\Exception\NotFoundException;
 use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Exception\UnknownRequestTypeException;
@@ -33,7 +34,7 @@ use Daktela\DaktelaV6\Response\Response;
  */
 class Client
 {
-    /** @var array index of all singleton instances of Daktela client */
+    /** @var array<string, Client> clients returned by the deprecated getInstance() */
     private static array $singletons = [];
     /** Maximum limit for reading all entities method */
     public const READ_LIMIT = 999;
@@ -42,12 +43,13 @@ class Client
 
     /**
      * Client constructor.
-     * By default, all clients created for the same instance and access token share one
-     * ApiCommunicator, so transport settings (retries, logger, HTTP client, ...) apply to all of them.
-     * Pass a dedicated ApiCommunicator to configure this client independently.
+     * Every client has an ApiCommunicator of its own, so its transport settings (retries, logger, HTTP
+     * client, ...) apply to this client only. Pass an ApiCommunicator to share one between clients, or to
+     * configure it before the client is created.
      * @param string $instance URL of the Daktela instance the client is connecting to
      * @param string $accessToken access token of the connecting user
-     * @param ApiCommunicator|null $apiCommunicator dedicated transport, or null to use the shared one
+     * @param ApiCommunicator|null $apiCommunicator transport to use, or null to create one from the instance
+     *     URL and the access token
      * @noinspection PhpUnused
      */
     public function __construct(
@@ -55,7 +57,7 @@ class Client
         #[\SensitiveParameter] string $accessToken,
         ?ApiCommunicator $apiCommunicator = null
     ) {
-        $this->apiCommunicator = $apiCommunicator ?? ApiCommunicator::getInstance($instance, $accessToken);
+        $this->apiCommunicator = $apiCommunicator ?? new ApiCommunicator($instance, $accessToken);
     }
 
     /**
@@ -90,11 +92,13 @@ class Client
 
     /**
      * Static method for using Daktela client connector as singleton.
-     * Every caller with the same URL and access token gets the same Client and the same shared
-     * ApiCommunicator, so transport settings changed by one caller apply to all of them.
+     * Every caller with the same URL and access token gets the same Client, so transport settings changed
+     * by one caller apply to all of them, and the client and its access token stay in memory until the
+     * process ends.
      * @param string $instance URL of the Daktela instance the client is connecting to
      * @param string $accessToken access token of the connecting user
      * @return Client instance of the Daktela client class
+     * @deprecated since 3.0.0: create the client with `new Client()` and pass it to the code that needs it
      * @noinspection PhpUnused
      */
     public static function getInstance(string $instance, #[\SensitiveParameter] string $accessToken): self
@@ -119,10 +123,6 @@ class Client
      */
     public function execute(ARequest $request): Response
     {
-        if ($request->isExecuted() && $request->getResponse() !== null) {
-            return $request->getResponse();
-        }
-
         if ($request instanceof UpdateRequest) {
             return $this->executeUpdate($request);
         } elseif ($request instanceof CreateRequest) {
@@ -226,7 +226,7 @@ class Client
     {
         if ($request->getTake() < 1) {
             // The offset would not advance: the same page would be read again and again
-            throw new RequestException('The take of a request reading all records must be at least 1');
+            throw new InvalidRequestException('The take of a request reading all records must be at least 1');
         }
         $data = [];
         $total = 0;
@@ -329,7 +329,7 @@ class Client
         }
         if (!is_null($request->getRelation())) {
             // Without the object, the request would read the records of the model instead of the relation
-            throw new RequestException('A relation needs an object name: call setObjectName() as well');
+            throw new InvalidRequestException('A relation needs an object name: call setObjectName() as well');
         }
 
         return $this->validateModel($request->getModel());
@@ -355,7 +355,7 @@ class Client
                 || $decoded === '..'
                 || strpbrk($decoded, "/\\\0") !== false
             ) {
-                throw new RequestException('Invalid object name or relation: ' . $segment);
+                throw new InvalidRequestException('Invalid object name or relation: ' . $segment);
             }
             $endpoint .= '/' . rawurlencode($segment);
         }
@@ -374,11 +374,11 @@ class Client
     {
         // A percent-encoded `?` or `#` stays a part of the path
         if (strpbrk($model, '?#') !== false || str_contains(rawurldecode($model), "\0")) {
-            throw new RequestException('Invalid model: ' . $model);
+            throw new InvalidRequestException('Invalid model: ' . $model);
         }
         foreach (preg_split('#[/\\\\]#', rawurldecode($model)) as $part) {
             if ($part === '.' || $part === '..') {
-                throw new RequestException('Invalid model: ' . $model);
+                throw new InvalidRequestException('Invalid model: ' . $model);
             }
         }
 
@@ -406,10 +406,10 @@ class Client
 
     /**
      * Returns the API communicator assigned to the current Daktela V6 client instance.
-     * @return ApiCommunicator|null API communicator assigned to the current Daktela V6 client instance; never null
+     * @return ApiCommunicator API communicator assigned to the current Daktela V6 client instance
      * @noinspection PhpUnused
      */
-    public function getApiCommunicator(): ?ApiCommunicator
+    public function getApiCommunicator(): ApiCommunicator
     {
         return $this->apiCommunicator;
     }
@@ -453,7 +453,7 @@ class Client
      * @param int|null $maxItems Maximum items to return (null for unlimited)
      * @param bool $stopOnError Whether to stop iteration on first error (default: true)
      * @return PaginatedIterator
-     * @throws \InvalidArgumentException when the page size is less than 1
+     * @throws InvalidRequestException when the page size is less than 1
      */
     public function iterate(
         ReadRequest $request,

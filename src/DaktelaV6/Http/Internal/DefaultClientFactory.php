@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Daktela\DaktelaV6\Http\Internal;
 
-use Daktela\DaktelaV6\Exception\RequestException;
+use Daktela\DaktelaV6\Exception\InvalidRequestException;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\HandlerStack;
@@ -29,7 +29,7 @@ final class DefaultClientFactory
      * @param bool $verifySsl whether SSL certificates are verified
      * @param LoggerInterface|null $logger logger warned about an insecure transport
      * @return ClientInterface
-     * @throws RequestException when the instance URL cannot be parsed
+     * @throws InvalidRequestException when the instance URL cannot be parsed
      */
     public static function create(string $baseUrl, float $requestTimeout, bool $verifySsl, ?LoggerInterface $logger): ClientInterface
     {
@@ -37,7 +37,7 @@ final class DefaultClientFactory
             $instance = new Uri((string)InstanceUrl::normalize($baseUrl));
         } catch (\InvalidArgumentException $invalidUrl) {
             // The message would quote the URL, which is not needed to find the mistake
-            throw new RequestException('The instance URL is not a valid URL.');
+            throw new InvalidRequestException('The instance URL is not a valid URL.');
         }
         if (!$verifySsl || strcasecmp($instance->getScheme(), 'https') !== 0) {
             $logger?->warning('The connection to the Daktela API is not secure', [

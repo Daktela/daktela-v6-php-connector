@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Daktela\Tests\Unit\Iterator;
 
 use Daktela\DaktelaV6\Client;
+use Daktela\DaktelaV6\Exception\InvalidRequestException;
 use Daktela\DaktelaV6\Http\ApiCommunicator;
 use Daktela\DaktelaV6\Iterator\PaginatedIterator;
 use Daktela\DaktelaV6\Request\ReadRequest;
@@ -501,7 +502,7 @@ class PaginatedIteratorTest extends TestCase
     {
         $client = $this->createMockClient([]);
 
-        $this->expectException(\InvalidArgumentException::class);
+        $this->expectException(InvalidRequestException::class);
         $this->expectExceptionMessage('The page size must be at least 1');
 
         $client->iterate(new ReadRequest('Users'), $pageSize);
@@ -510,20 +511,5 @@ class PaginatedIteratorTest extends TestCase
     public function invalidPageSizes(): array
     {
         return ['zero' => [0], 'negative' => [-10]];
-    }
-
-    public function testResponseStoredOnTheRequestIsNotReturnedForEveryPage(): void
-    {
-        $client = $this->createMockClient([
-            $this->createJsonResponse([['id' => 1], ['id' => 2]], 3),
-            $this->createJsonResponse([['id' => 3]], 3),
-        ]);
-        $request = new ReadRequest('Users');
-        $request->setResponse(new Response([(object)['id' => 99], (object)['id' => 99]], 0, [], 200));
-        $request->setExecuted(true);
-
-        $ids = array_map(static fn ($item) => $item->id, $client->iterate($request, 2)->toArray());
-
-        $this->assertSame([1, 2, 3], $ids);
     }
 }

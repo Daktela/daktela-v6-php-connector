@@ -24,7 +24,6 @@ jobs:
       fail-fast: false
       matrix:
         php-version:
-          - '8.0'
           - '8.1'
           - '8.2'
           - '8.3'
@@ -37,10 +36,10 @@ jobs:
           - 'highest'
         include:
           # The lowest versions composer.json allows, e.g. Guzzle 7.15.2 and Guzzle 8.0.1
-          - php-version: '8.0'
+          - php-version: '8.1'
             guzzle: '7'
             dependencies: 'lowest'
-          - php-version: '8.0'
+          - php-version: '8.1'
             guzzle: '8'
             dependencies: 'lowest'
 

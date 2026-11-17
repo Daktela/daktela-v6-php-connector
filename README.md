@@ -4,16 +4,16 @@ Daktela V6 PHP Connector is a library that enables your PHP application to conne
 
 ## Installation
 
-The connector requires PHP 8.0 or newer, the `mbstring` extension, and Guzzle 7 (7.15.2 or newer, with PSR-7 2.13 or newer) or Guzzle 8 (8.0.1 or newer, with PSR-7 3). Composer installs the Guzzle version that fits the other dependencies of your project. The recommended way to install it is through Composer:
+The connector requires PHP 8.1 or newer, the `mbstring` extension, and Guzzle 7 (7.15.2 or newer, with PSR-7 2.13 or newer) or Guzzle 8 (8.0.1 or newer, with PSR-7 3). Composer installs the Guzzle version that fits the other dependencies of your project. The recommended way to install it is through Composer:
 
 ```bash
-composer require daktela/daktela-v6-php-connector:^2.10
+composer require daktela/daktela-v6-php-connector:^3.0
 ```
 
 When upgrading an existing installation, Composer may need permission to update transitive dependencies:
 
 ```bash
-composer require daktela/daktela-v6-php-connector:^2.10 --with-all-dependencies
+composer require daktela/daktela-v6-php-connector:^3.0 --with-all-dependencies
 ```
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes and upgrade requirements.
@@ -40,21 +40,7 @@ $client->getApiCommunicator()->setRequestTimeout(30.0); // 30 seconds
 
 ## Usage
 
-There are two ways you can use the Daktela V6 PHP Connector:
-
-1. Instantiate the connector directly when using one set of credentials.
-2. Use the static instance accessor when working with multiple instance URL and access-token pairs.
-
-Clients with the same instance URL and access token share the same `ApiCommunicator`, including its authentication method, timeout, SSL verification, User-Agent suffix, logger, custom HTTP client, retry, and rate-limit settings. `Client::getInstance()` also returns the same `Client` object for the same pair. A setting changed through one of them applies to all code that uses the pair. Configure those clients consistently, or give a client its own transport:
-
-```php
-use Daktela\DaktelaV6\Client;
-use Daktela\DaktelaV6\Http\ApiCommunicator;
-
-$client = new Client($instance, $accessToken, new ApiCommunicator($instance, $accessToken));
-```
-
-### 1. Using instance of the connector
+Create a client with the URL of the instance and an access token, and execute requests with it:
 
 ```php
 use Daktela\DaktelaV6\Client;
@@ -69,21 +55,19 @@ $request = RequestFactory::buildReadRequest("Users")
 $response = $client->execute($request);
 ```
 
-### 2. Using static access methods
+Every client has an `ApiCommunicator` of its own, which holds its transport settings: authentication method, timeout, SSL verification, User-Agent suffix, logger, custom HTTP client, retry, and rate-limit settings. To share one transport between clients, or to configure it before the client is created, pass it to the constructor:
 
 ```php
 use Daktela\DaktelaV6\Client;
-use Daktela\DaktelaV6\RequestFactory;
+use Daktela\DaktelaV6\Http\ApiCommunicator;
 
-$instance = "https://mydaktela.daktela.com/";
-$accessToken = "your-access-token";
+$communicator = new ApiCommunicator($instance, $accessToken);
+$communicator->setRequestTimeout(10.0);
 
-$client = Client::getInstance($instance, $accessToken);
-$request = RequestFactory::buildReadRequest("Users")
-    ->addFilter("username", "eq", "admin");
-$response = $client->execute($request);
+$client = new Client($instance, $accessToken, $communicator);
 ```
 
+`Client::getInstance()` and `ApiCommunicator::getInstance()` are deprecated. They return one shared object per instance URL and access token, so a setting changed by one caller applies to all of them, and the object stays in memory with its token until the process ends. Create the client once and pass it to the code that needs it.
 ## Operations
 
 The allowed operations serve for CRUD manipulation with objects. Each operation uses the builder pattern and corresponds
@@ -241,6 +225,8 @@ $httpStatus =   $response->getHttpStatus();
 
 Transport failures and, with Guzzle's default `http_errors` setting, non-retryable HTTP 4xx/5xx responses are wrapped in `Daktela\DaktelaV6\Exception\RequestException`. Other exceptions of the HTTP client, for example from a custom client, are wrapped in `RequestException` as well: a Guzzle request or network exception is chained as a copy without the access token, and any other exception is not chained, because its own previous exceptions may carry the token. HTTP 429 responses use the more specific `RateLimitException`, which extends `RequestException` and returns 429 from `getHttpStatus()`.
 
+A request that is not valid, such as a model or object name that would address another endpoint, a relation without its object, a page size below 1, or an instance URL that cannot be parsed, throws `InvalidRequestException` before anything is sent. It extends `RequestException`.
+
 HTTP 404 responses throw `NotFoundException`, which also extends `RequestException`. For HTTP errors, the exception exposes the response details:
 
 ```php
@@ -362,9 +348,9 @@ $client->getApiCommunicator()->setAuthenticationMethod(
 );
 ```
 
-### 3. Query Parameter Authentication
+### 3. Query Parameter Authentication (Deprecated)
 
-Alternatively, you can send the access token as a query parameter (`accessToken`). This method may be useful for compatibility with certain proxy configurations or firewall rules.
+This method is deprecated: the token becomes part of the request URL, which web servers and proxies write to their logs. Alternatively, you can send the access token as a query parameter (`accessToken`). This method may be useful for compatibility with certain proxy configurations or firewall rules.
 
 ```php
 use Daktela\DaktelaV6\Client;

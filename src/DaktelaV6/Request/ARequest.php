@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Daktela\DaktelaV6\Request;
 
-use Daktela\DaktelaV6\Response\Response;
-
 /**
  * The ARequest class is an abstract class that contains common logic for all request
  * classes and all the request types should inherit this class.
@@ -15,10 +13,6 @@ abstract class ARequest
 {
     /** @var string name of the API model of the request */
     private string $model;
-    /** @var bool variable used for flagging the request as already executed */
-    private bool $executed = false;
-    /** @var Response|null cached response of the request */
-    private ?Response $response = null;
     /** @var array additional query params that should be sent as part of the HTTP request */
     private array $additionalQueryParameters = [];
 
@@ -29,49 +23,6 @@ abstract class ARequest
     public function __construct(string $model)
     {
         $this->model = $model;
-    }
-
-    /**
-     * Checks if the request has been flagged as executed with setExecuted(). The client does not set the flag.
-     * @return bool boolean value if the request has already been executed
-     * @deprecated since 2.10.0, will be removed in 3.0.0 together with the stored response
-     */
-    public function isExecuted(): bool
-    {
-        return $this->executed;
-    }
-
-    /**
-     * Sets the request as already executed or not. Client::execute() returns the response stored with
-     * setResponse() for a request flagged this way instead of sending it.
-     * @param bool $executed boolean value if the request has already been executed
-     * @deprecated since 2.10.0, will be removed in 3.0.0: keep the response in your own code instead
-     * @noinspection PhpUnused
-     */
-    public function setExecuted(bool $executed)
-    {
-        $this->executed = $executed;
-    }
-
-    /**
-     * Sets the response of the request.
-     * @param Response $response response of the request
-     * @deprecated since 2.10.0, will be removed in 3.0.0: keep the response in your own code instead
-     * @noinspection PhpUnused
-     */
-    public function setResponse(Response $response)
-    {
-        $this->response = $response;
-    }
-
-    /**
-     * Returns the response of the request.
-     * @return Response|null response of the request, or null when none has been stored
-     * @deprecated since 2.10.0, will be removed in 3.0.0: keep the response in your own code instead
-     */
-    public function getResponse(): ?Response
-    {
-        return $this->response;
     }
 
     /**

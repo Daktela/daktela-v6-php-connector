@@ -4,6 +4,30 @@ All notable changes to this project are documented in this file. The project fol
 
 ## [Unreleased]
 
+This will be version 3.0.0. Code that creates a `Client` with a static access token or `Client::login()` and executes requests needs no changes on Daktela 31.37.0, 32.36.0, 33.14.0, or later. Read the Changed and Removed sections before upgrading.
+
+### Changed
+
+- **Breaking:** made the standard `Authorization: Bearer` header the default authentication method instead of `X-AUTH-TOKEN`. Daktela versions older than 31.37.0, 32.36.0, or 33.14.0 do not read it and answer HTTP 401. For them, call `setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_HEADER)` on the client's `ApiCommunicator`.
+- **Breaking:** PHP 8.1 is the lowest supported version.
+- **Breaking:** `new Client($instance, $accessToken)` creates an `ApiCommunicator` of its own. Clients with the same instance URL and access token shared one, so a timeout, logger, or authentication method set through one client applied to the others. To share a transport, pass one `ApiCommunicator` to the constructors.
+- **Breaking:** `Client::iterate()` and `PaginatedIterator` throw an `InvalidRequestException` for a page size below 1 instead of an `InvalidArgumentException`.
+- `Client::getApiCommunicator()` is declared to return `ApiCommunicator` instead of `?ApiCommunicator`. It never returned `null`.
+- `ApiCommunicator` no longer has a `__debugInfo()` method; `var_dump()` and `print_r()` still show `***` for the access token.
+- `ApiCommunicator` delegates to internal classes in `Daktela\DaktelaV6\Http\Internal` for building requests, parsing responses, redaction, retries, and the login session. Its public methods and their behaviour are unchanged. The internal classes are not part of the public API and may change in any release.
+
+### Added
+
+- `InvalidRequestException`, which extends `RequestException`, for a request or configuration that is not valid and is rejected before anything is sent: an invalid model, object name, or relation, a relation without an object name, a `take` or page size below 1, an instance URL that cannot be parsed, an unknown authentication method, an access token with control characters, and a payload that cannot be encoded as JSON. Code that catches `RequestException` keeps working.
+
+### Deprecated
+
+- `Client::getInstance()` and `ApiCommunicator::getInstance()`. They keep one shared object, with its access token, in memory until the process ends. Create the object with `new` and pass it to the code that needs it.
+- `ApiCommunicator::AUTHENTICATION_METHOD_QUERY`. The token becomes part of the request URL, which web servers and proxies log. Use a header method.
+
+### Removed
+
+- **Breaking:** `ARequest::setExecuted()`, `isExecuted()`, `setResponse()`, and `getResponse()`, deprecated in 2.10.0. `Client::execute()` always sends the request.
 ## [2.10.0] - 2026-11-17
 
 This release fixes the findings of a review of the whole library. No public method signatures were changed. Read the Changed section before upgrading: a few calls that used to return wrong data or never finish now throw.

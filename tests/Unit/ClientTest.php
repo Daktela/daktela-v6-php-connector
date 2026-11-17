@@ -7,6 +7,7 @@ namespace Daktela\Tests\Unit;
 use Daktela\DaktelaV6\Auth\InMemoryTokenStore;
 use Daktela\DaktelaV6\Auth\TokenSet;
 use Daktela\DaktelaV6\Client;
+use Daktela\DaktelaV6\Exception\InvalidRequestException;
 use Daktela\DaktelaV6\Exception\NotFoundException;
 use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Exception\UnknownRequestTypeException;
@@ -63,25 +64,27 @@ class ClientTest extends TestCase
         );
     }
 
+    public function testEveryClientHasATransportOfItsOwn(): void
+    {
+        $first = new Client('https://example.com', 'token');
+        $second = new Client('https://example.com', 'token');
+        $first->getApiCommunicator()->setRequestTimeout(30.0);
+
+        $this->assertNotSame($first->getApiCommunicator(), $second->getApiCommunicator());
+        $this->assertSame(2.0, $this->getPrivateProperty($second->getApiCommunicator(), 'requestTimeout'));
+    }
+
+    public function testInvalidRequestIsARequestException(): void
+    {
+        $this->assertInstanceOf(RequestException::class, new InvalidRequestException('Invalid model: x'));
+    }
+
     public function testGetApiCommunicator(): void
     {
         $communicator = $this->createCommunicator();
         $client = $this->createClient($communicator);
 
         $this->assertSame($communicator, $client->getApiCommunicator());
-    }
-
-    public function testExecuteReturnsManuallyCachedResponseWithoutSendingRequest(): void
-    {
-        $communicator = $this->createCommunicator();
-        $communicator->expects($this->never())->method('sendRequest');
-        $client = $this->createClient($communicator);
-        $request = new ReadRequest('Users');
-        $cached = new Response([['id' => 1]], 1, [], 200);
-        $request->setResponse($cached);
-        $request->setExecuted(true);
-
-        $this->assertSame($cached, $client->execute($request));
     }
 
     public function testExecuteRejectsUnknownRequestClass(): void
@@ -505,18 +508,6 @@ class ClientTest extends TestCase
         $this->assertCount(3, $client->execute($request)->getData());
     }
 
-    public function testExecuteSendsRequestWhenExecutedFlagHasNoResponse(): void
-    {
-        $communicator = $this->createCommunicator();
-        $expected = new Response([], 0, [], 200);
-        $communicator->expects($this->once())->method('sendRequest')->willReturn($expected);
-        $client = $this->createClient($communicator);
-        $request = new ReadRequest('Users');
-        $request->setExecuted(true);
-
-        $this->assertSame($expected, $client->execute($request));
-    }
-
     public function testEmptyObjectNameWithRelationIsRejected(): void
     {
         $communicator = $this->createCommunicator();
@@ -628,7 +619,7 @@ class ClientTest extends TestCase
         $communicator = $this->createCommunicator();
         $communicator->expects($this->never())->method('sendRequest');
 
-        $this->expectException(RequestException::class);
+        $this->expectException(InvalidRequestException::class);
         $this->expectExceptionMessage('Invalid model');
 
         $this->createClient($communicator)->execute(new ReadRequest($model));

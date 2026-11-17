@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Daktela\DaktelaV6\Http\Internal;
 
+use Daktela\DaktelaV6\Exception\InvalidRequestException;
 use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Http\ApiCommunicator;
 use GuzzleHttp\Psr7\Request;
@@ -59,7 +60,7 @@ final class RequestBuilder
             && preg_match('/[\x00-\x08\x0A-\x1F\x7F]/', $this->credentials->accessToken()) === 1
         ) {
             // Not a valid header value: Guzzle's error would quote the header value, trimmed, so redact() could miss it
-            throw new RequestException('The access token contains a line break or another control character.');
+            throw new InvalidRequestException('The access token contains a line break or another control character.');
         }
         // A copy: the trace of an exception created here records the parameters, which must not get the token
         $query = $queryParams;
@@ -90,7 +91,7 @@ final class RequestBuilder
         } catch (\JsonException $ex) {
             // e.g. a string that is not valid UTF-8; the message does not quote the payload, and the exception,
             // whose trace holds the payload as an argument, is not chained
-            throw new RequestException('The request payload cannot be encoded as JSON: json_encode error: ' . $ex->getMessage());
+            throw new InvalidRequestException('The request payload cannot be encoded as JSON: json_encode error: ' . $ex->getMessage());
         }
 
         try {
@@ -103,7 +104,7 @@ final class RequestBuilder
         if ($request->getUri()->getHost() !== '' || $request->getUri()->getScheme() !== '') {
             // The request is a path the HTTP client resolves against the instance; one that names a host of its
             // own would take the credentials there
-            throw new RequestException('The request would not be sent to the instance; check the instance URL.');
+            throw new InvalidRequestException('The request would not be sent to the instance; check the instance URL.');
         }
 
         return $request;

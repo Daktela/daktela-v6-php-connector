@@ -52,6 +52,8 @@ class ApiCommunicatorLoginTest extends TestCase
             return $mock($request, $options);
         });
         $communicator = new ApiCommunicator('https://example.com', '');
+        // The session tests read the access token from the X-AUTH-TOKEN header
+        $communicator->setAuthenticationMethod(ApiCommunicator::AUTHENTICATION_METHOD_HEADER);
         $communicator->setHttpClient(new Client(['handler' => $stack]));
 
         return $communicator;

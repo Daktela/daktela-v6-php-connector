@@ -338,19 +338,19 @@ $client = new Client($instance, '', $communicator);
 
 The connector supports three ways of passing the access token to the Daktela V6 API. It sends the token in exactly one of them.
 
-### 1. X-AUTH-TOKEN Header (Default)
+### 1. Authorization: Bearer Header (Default)
 
-By default, the access token is sent in the `X-AUTH-TOKEN` HTTP header. Every Daktela V6 version accepts it, so it remains the default. The Daktela API documentation lists it as a legacy header in favour of `Authorization: Bearer`, but it is still supported.
+By default, the access token is sent in the standard `Authorization: Bearer <token>` header, which the Daktela API documentation recommends. It requires Daktela 31.37.0, 32.36.0, 33.14.0, or later. Older versions do not read this header: API endpoints answer HTTP 401, and the health check reports the token as not accepted. Use the `X-AUTH-TOKEN` header for them.
 
 ```php
 use Daktela\DaktelaV6\Client;
 $client = new Client($instance, $accessToken);
-// Token is automatically sent via X-AUTH-TOKEN header
+// Token is automatically sent via the Authorization: Bearer header
 ```
 
-### 2. Authorization: Bearer Header
+### 2. X-AUTH-TOKEN Header (Legacy)
 
-The standard `Authorization: Bearer <token>` header is the method the Daktela API documentation recommends. It requires Daktela 31.37.0, 32.36.0, 33.14.0, or later. Older versions do not read this header: API endpoints answer HTTP 401, and the health check reports the token as not accepted.
+The access token can be sent in the proprietary `X-AUTH-TOKEN` header, which every Daktela V6 version accepts. The Daktela API documentation lists it as legacy, but it is still supported. Use it for Daktela versions older than 31.37.0, 32.36.0, or 33.14.0.
 
 ```php
 use Daktela\DaktelaV6\Client;
@@ -358,7 +358,7 @@ use Daktela\DaktelaV6\Http\ApiCommunicator;
 
 $client = new Client($instance, $accessToken);
 $client->getApiCommunicator()->setAuthenticationMethod(
-    ApiCommunicator::AUTHENTICATION_METHOD_BEARER
+    ApiCommunicator::AUTHENTICATION_METHOD_HEADER
 );
 ```
 
@@ -380,7 +380,7 @@ To switch back to the default header:
 
 ```php
 $client->getApiCommunicator()->setAuthenticationMethod(
-    ApiCommunicator::AUTHENTICATION_METHOD_HEADER
+    ApiCommunicator::AUTHENTICATION_METHOD_BEARER
 );
 ```
 

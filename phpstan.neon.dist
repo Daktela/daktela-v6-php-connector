@@ -8,7 +8,7 @@ parameters:
             message: '#GuzzleHttp\\Exception\\(ResponseException|ResponseTransferException|ResponseTimeoutException|NetworkException|NetworkTimeoutException|ConnectTimeoutException)\b#'
             identifier: class.notFound
             paths:
-                - src/DaktelaV6/Http/ApiCommunicator.php
+                - src/DaktelaV6/Http/Internal/Transport.php
                 - src/DaktelaV6/Http/GuzzleCompat.php
             reportUnmatched: false
         # Guzzle 7 keeps the response on every RequestException; the check is for Guzzle 8

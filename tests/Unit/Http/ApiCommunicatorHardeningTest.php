@@ -6,6 +6,9 @@ namespace Daktela\Tests\Unit\Http;
 
 use Daktela\DaktelaV6\Exception\RequestException;
 use Daktela\DaktelaV6\Http\ApiCommunicator;
+use Daktela\DaktelaV6\Http\Internal\Credentials;
+use Daktela\DaktelaV6\Http\Internal\Redactor;
+use Daktela\DaktelaV6\Http\Internal\RequestBuilder;
 use Daktela\Tests\Support\ExposesTraces;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
@@ -42,9 +45,6 @@ class ApiCommunicatorHardeningTest extends TestCase
     private static function invoke(object $object, string $method): mixed
     {
         $reflection = new \ReflectionMethod($object, $method);
-        if (PHP_VERSION_ID < 80100) {
-            $reflection->setAccessible(true);
-        }
 
         return $reflection->invoke($object);
     }
@@ -91,7 +91,7 @@ class ApiCommunicatorHardeningTest extends TestCase
         $communicator = new ApiCommunicator('https://example.com', $token);
         $communicator->setHttpClient(new Client(['handler' => HandlerStack::create(
             static function (RequestInterface $request): void {
-                throw new \TypeError('Middleware failed for ' . $request->getHeaderLine('X-AUTH-TOKEN'));
+                throw new \TypeError('Middleware failed for ' . $request->getHeaderLine('Authorization'));
             }
         )]));
 
@@ -99,7 +99,7 @@ class ApiCommunicatorHardeningTest extends TestCase
             $communicator->sendRequest('GET', 'Users');
             $this->fail('A RequestException was expected');
         } catch (RequestException $ex) {
-            $this->assertStringContainsString('Middleware failed for ***', $ex->getMessage());
+            $this->assertStringContainsString('Middleware failed for Bearer ***', $ex->getMessage());
             $this->assertNull($ex->getPrevious());
             $this->assertStringNotContainsString($token, self::exposed($ex));
         }
@@ -292,9 +292,6 @@ class ApiCommunicatorHardeningTest extends TestCase
 
         // As after a fork: the cached client was created by a process with another id
         $property = new \ReflectionProperty(ApiCommunicator::class, 'defaultClients');
-        if (PHP_VERSION_ID < 80100) {
-            $property->setAccessible(true);
-        }
         $property->getValue()[$communicator] = [-1, $inherited];
 
         $own = self::invoke($communicator, 'defaultClient');
@@ -304,13 +301,17 @@ class ApiCommunicatorHardeningTest extends TestCase
 
     public function testOnlyLoginAndRefreshRequestsGetTheCredentials(): void
     {
-        $method = new \ReflectionMethod(ApiCommunicator::class, 'credentialsPayload');
-        if (PHP_VERSION_ID < 80100) {
-            $method->setAccessible(true);
-        }
+        $credentials = new Credentials('token');
+        $builder = new RequestBuilder(
+            'https://example.com',
+            $credentials,
+            new Redactor($credentials),
+            ApiCommunicator::AUTHENTICATION_METHOD_BEARER,
+            null
+        );
 
         $this->expectException(\LogicException::class);
-        $method->invoke(new ApiCommunicator('https://example.com', 'token'), 'whoim');
+        $builder->build('POST', 'whoim', [], null, false);
     }
 
     public function testLoginRequestIsLoggedAsHavingABody(): void

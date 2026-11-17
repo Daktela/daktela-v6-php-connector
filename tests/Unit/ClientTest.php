@@ -33,9 +33,6 @@ class ClientTest extends TestCase
     {
         $client = new Client('https://test-' . uniqid() . '.example.com', 'token');
         $property = new \ReflectionProperty(Client::class, 'apiCommunicator');
-        if (PHP_VERSION_ID < 80100) {
-            $property->setAccessible(true);
-        }
         $property->setValue($client, $communicator);
         return $client;
     }
@@ -43,9 +40,6 @@ class ClientTest extends TestCase
     private function getPrivateProperty(object $object, string $name): mixed
     {
         $property = new \ReflectionProperty($object, $name);
-        if (PHP_VERSION_ID < 80100) {
-            $property->setAccessible(true);
-        }
         return $property->getValue($object);
     }
 
@@ -370,7 +364,7 @@ class ClientTest extends TestCase
         $stack->push(\GuzzleHttp\Middleware::history($history));
         $communicator->setHttpClient(new \GuzzleHttp\Client(['handler' => $stack]));
         $client->execute(new ReadRequest('Users'));
-        $this->assertSame($accessToken, $history[0]['request']->getHeaderLine('X-AUTH-TOKEN'));
+        $this->assertSame('Bearer ' . $accessToken, $history[0]['request']->getHeaderLine('Authorization'));
     }
 
     public function testPingDelegatesToCommunicator(): void
